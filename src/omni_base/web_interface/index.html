@@ -1,59 +1,323 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <meta charset="utf-8" />
-    <title>OmniServ Live Map</title>
-    
-    <script src="https://static.robotwebtools.org/EventEmitter2/current/eventemitter2.min.js"></script>
-    <script src="https://static.robotwebtools.org/roslibjs/current/roslib.min.js"></script>
-    <script src="https://static.robotwebtools.org/EaselJS/current/easeljs.min.js"></script>
-    <script src="https://static.robotwebtools.org/ros2djs/current/ros2d.min.js"></script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OmniServ / Varys — Live Dashboard</title>
 
-    <script type="text/javascript">
-        function init() {
-            // 1. Connect to the ROS 2 WebSocket on the Raspberry Pi
-            // REPLACE 'raspberrypi_ip_address' with your Pi's actual IP on the Wi-Fi
-            var ros = new ROSLIB.Ros({
-                url : 'ws://raspberrypi_ip_address:9090'
-            });
+  <script src="https://static.robotwebtools.org/EventEmitter2/current/eventemitter2.min.js"></script>
+  <script src="https://static.robotwebtools.org/roslibjs/current/roslib.min.js"></script>
+  <script src="https://static.robotwebtools.org/EaselJS/current/easeljs.min.js"></script>
+  <script src="https://static.robotwebtools.org/ros2djs/current/ros2d.min.js"></script>
 
-            ros.on('connection', function() {
-                console.log('Connected to OmniServ websocket server.');
-            });
-
-            ros.on('error', function(error) {
-                console.log('Error connecting to websocket server: ', error);
-            });
-
-            ros.on('close', function() {
-                console.log('Connection to websocket server closed.');
-            });
-
-            // 2. Create the 2D Map Viewer in the HTML div below
-            var viewer = new ROS2D.Viewer({
-                divID : 'map_canvas',
-                width : 600,
-                height : 600
-            });
-
-            // 3. Subscribe to the dynamically updating global costmap
-            var gridClient = new ROS2D.OccupancyGridClient({
-                ros : ros,
-                rootObject : viewer.scene,
-                topic : '/global_costmap/costmap', // Subscribing to the live obstacle map
-                continuous : true // TRUE means it will update simultaneously as the robot moves
-            });
-
-            // 4. Scale the canvas to fit the map once it loads
-            gridClient.on('change', function() {
-                viewer.scaleToDimensions(gridClient.currentGrid.width, gridClient.currentGrid.height);
-                viewer.shift(gridClient.currentGrid.pose.position.x, gridClient.currentGrid.pose.position.y);
-            });
-        }
-    </script>
+  <style>
+    :root { --bg:#0f1419; --panel:#1b232c; --line:#2c3744; --accent:#3da5ff; --ok:#36c275; --warn:#e0b341; --bad:#e0533d; --text:#e6edf3; --muted:#7f8c99; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+           background:#0f1419; color:#e6edf3; }
+    header { display:flex; align-items:center; gap:12px; padding:10px 16px;
+             background:#1b232c; border-bottom:1px solid #2c3744; flex-wrap:wrap; }
+    header h1 { font-size:18px; margin:0; font-weight:600; }
+    .conn { display:flex; align-items:center; gap:6px; font-size:13px; }
+    .dot { width:10px; height:10px; border-radius:50%; background:#e0533d; }
+    .dot.ok { background:#36c275; } .dot.warn { background:#e0b341; }
+    header input { background:#0f1419; border:1px solid #2c3744; color:#e6edf3;
+                   border-radius:6px; padding:6px 8px; font-size:13px; width:150px; }
+    header button, .btn { background:#243140; border:1px solid #2c3744; color:#e6edf3;
+            border-radius:6px; padding:6px 10px; font-size:13px; cursor:pointer; }
+    header button:hover, .btn:hover { background:#2d3d4f; }
+    .layout { display:grid; grid-template-columns: 2fr 1fr; gap:14px; padding:14px; }
+    @media (max-width: 900px){ .layout { grid-template-columns: 1fr; } }
+    .panel { background:#1b232c; border:1px solid #2c3744; border-radius:10px; padding:12px; }
+    .panel h2 { margin:0 0 10px; font-size:14px; color:#9fb0c0; font-weight:600;
+                text-transform:uppercase; letter-spacing:.04em; }
+    #map_canvas { width:100%; border:1px solid #2c3744; border-radius:8px; background:#0a0e12;
+                  display:block; cursor:crosshair; }
+    .rooms, .drive, .anim { display:flex; flex-wrap:wrap; gap:8px; }
+    .grid4 { display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; }
+    .sensor { background:#0f1419; border:1px solid #2c3744; border-radius:6px;
+              padding:8px; text-align:center; font-size:13px; }
+    .sensor .v { font-size:18px; font-weight:700; }
+    .sensor.near { border-color:#e0b341; } .sensor.hit { border-color:#e0533d; }
+    .pit { margin-top:10px; padding:8px; border-radius:6px; text-align:center; font-weight:700;
+           background:#16241a; border:1px solid #2c3744; }
+    .pit.alert { background:#3a1714; border-color:#e0533d; color:#ff9b88; }
+    #transcript { height:120px; overflow:auto; background:#0f1419; border:1px solid #2c3744;
+                  border-radius:6px; padding:8px; font-size:13px; line-height:1.5; }
+    #transcript div { padding:2px 0; border-bottom:1px solid #1c252e; }
+    .hint { color:#7f8c99; font-size:12px; margin-top:6px; }
+    .row { margin-bottom:14px; }
+  </style>
 </head>
-<body onload="init()">
-    <h1>OmniServ Autonomous Navigation Feed</h1>
-    <div id="map_canvas" style="border: 2px solid black; width: 600px; height: 600px;"></div>
+<body>
+  <header>
+    <h1>OmniServ · Varys</h1>
+    <div class="conn"><span id="status_dot" class="dot"></span><span id="status_text">disconnected</span></div>
+    <span style="flex:1"></span>
+    <label style="font-size:13px;">Pi IP
+      <input id="ip_input" placeholder="192.168.1.x" />
+    </label>
+    <button id="connect_btn">Connect</button>
+  </header>
+
+  <div class="layout">
+    <!-- ── Map column ── -->
+    <div class="panel">
+      <h2>Live Map &amp; Navigation</h2>
+      <div id="map_canvas"></div>
+      <div class="hint">Click anywhere on the map to send a navigation goal. Robot pose and the planned path are drawn live.</div>
+    </div>
+
+    <!-- ── Controls column ── -->
+    <div>
+      <div class="panel row">
+        <h2>Go To Room</h2>
+        <div class="rooms" id="rooms"></div>
+      </div>
+
+      <div class="panel row">
+        <h2>Sensors</h2>
+        <div class="grid4" id="us_grid"></div>
+        <div class="pit" id="pit_box">Pit sensors: clear</div>
+      </div>
+
+      <div class="panel row">
+        <h2>Manual Control</h2>
+        <div class="grid4">
+          <span></span>
+          <button class="btn" data-cmd="&lt;20,20&gt;">▲ Fwd</button>
+          <span></span>
+          <button class="btn" data-cmd="&lt;-20,20&gt;">◀ Left</button>
+          <button class="btn" data-cmd="&lt;0,0&gt;">■ Stop</button>
+          <button class="btn" data-cmd="&lt;20,-20&gt;">Right ▶</button>
+          <span></span>
+          <button class="btn" data-cmd="&lt;-20,-20&gt;">▼ Back</button>
+          <span></span>
+        </div>
+        <div class="anim" style="margin-top:8px;">
+          <button class="btn" data-cmd="&lt;NOD&gt;">Nod</button>
+          <button class="btn" data-cmd="&lt;SHAKE&gt;">Shake</button>
+          <button class="btn" data-cmd="&lt;WAVE:R&gt;">Wave</button>
+          <button class="btn" data-cmd="&lt;EBLINK&gt;">Blink</button>
+          <button class="btn" data-cmd="&lt;CENTER&gt;">Center</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Heard (voice)</h2>
+        <div id="transcript"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  // ── Room coordinates ──
+  // Canonical source of truth: config/rooms.yaml (loaded by voice_node.py).
+  // Keep these names/coordinates in sync with that file when rooms change.
+  const ROOMS = {
+    'Room 1':    [ 0.703, -0.069, 1.75],
+    'Room 2':    [-0.127, -0.235, 3.09],
+    'Room 3':    [-0.198, -1.068, 1.83],
+    'Room 4':    [-2.0,    1.5,   0.0 ],
+    'Reception': [-1.0,    0.5,   1.57],
+    'Lobby':     [ 0.5,   -2.0,   3.14],
+    'Home':      [ 0.0,    0.0,   0.0 ],
+  };
+  const US_SENSORS = ['front_left','front_center','front_right','rear_left','rear_center','rear_right'];
+
+  let ros = null, viewer = null, gridClient = null, tfClient = null;
+  let goalPub = null, bodyPub = null;
+  let robotMarker = null, pathShape = null;
+
+  // ── Connection ──
+  function getIp() {
+    const q = new URLSearchParams(location.search).get('ip');
+    return q || document.getElementById('ip_input').value.trim();
+  }
+  function setStatus(state, text) {
+    const dot = document.getElementById('status_dot');
+    dot.className = 'dot' + (state === 'ok' ? ' ok' : state === 'warn' ? ' warn' : '');
+    document.getElementById('status_text').textContent = text;
+  }
+
+  function connect() {
+    const ip = getIp();
+    if (!ip) { alert('Enter the Raspberry Pi IP address.'); return; }
+    if (ros) { try { ros.close(); } catch (e) {} }
+    setStatus('warn', 'connecting…');
+
+    ros = new ROSLIB.Ros({ url: 'ws://' + ip + ':9090' });
+
+    ros.on('connection', () => { setStatus('ok', 'connected'); setupRos(); });
+    ros.on('error',  () => setStatus('bad', 'connection error'));
+    ros.on('close',  () => setStatus('bad', 'disconnected'));
+  }
+
+  function setupRos() {
+    // Publishers
+    goalPub = new ROSLIB.Topic({ ros, name: '/goal_pose', messageType: 'geometry_msgs/PoseStamped' });
+    bodyPub = new ROSLIB.Topic({ ros, name: '/robot/body/command', messageType: 'std_msgs/String' });
+
+    buildMap();
+    subscribeRobotPose();
+    subscribePath();
+    subscribeSensors();
+    subscribeTranscript();
+  }
+
+  // ── Map + costmap ──
+  function buildMap() {
+    document.getElementById('map_canvas').innerHTML = '';
+    viewer = new ROS2D.Viewer({ divID: 'map_canvas', width: 600, height: 600 });
+    gridClient = new ROS2D.OccupancyGridClient({
+      ros, rootObject: viewer.scene,
+      topic: '/global_costmap/costmap', continuous: true
+    });
+    gridClient.on('change', () => {
+      viewer.scaleToDimensions(gridClient.currentGrid.width, gridClient.currentGrid.height);
+      viewer.shift(gridClient.currentGrid.pose.position.x, gridClient.currentGrid.pose.position.y);
+      ensureOverlays();
+    });
+    attachClickToGoal();
+  }
+
+  // Robot marker + path live in scene-local coords, which ros2d renders in ROS metres.
+  function ensureOverlays() {
+    if (!robotMarker) {
+      robotMarker = new ROS2D.NavigationArrow({
+        size: 0.4, strokeSize: 0.05, fillColor: createjs.Graphics.getRGB(61,165,255,0.9), pulse: false
+      });
+      viewer.scene.addChild(robotMarker);
+    }
+    if (!pathShape) {
+      pathShape = new createjs.Shape();
+      viewer.scene.addChild(pathShape);
+    }
+  }
+
+  function subscribeRobotPose() {
+    tfClient = new ROSLIB.TFClient({
+      ros, fixedFrame: 'map', angularThres: 0.02, transThres: 0.02, rate: 10.0
+    });
+    tfClient.subscribe('base_link', (tf) => {
+      ensureOverlays();
+      if (!robotMarker) return;
+      robotMarker.x = tf.translation.x;
+      robotMarker.y = -tf.translation.y;            // ros2d flips Y
+      const q = tf.rotation;
+      const yaw = Math.atan2(2*(q.w*q.z + q.x*q.y), 1 - 2*(q.y*q.y + q.z*q.z));
+      robotMarker.rotation = -yaw * 180 / Math.PI;
+      if (viewer) viewer.scene.update();
+    });
+  }
+
+  function subscribePath() {
+    new ROSLIB.Topic({ ros, name: '/plan', messageType: 'nav_msgs/Path', throttle_rate: 250 })
+      .subscribe((msg) => {
+        ensureOverlays();
+        if (!pathShape) return;
+        const g = pathShape.graphics; g.clear();
+        g.setStrokeStyle(0.04).beginStroke('#36c275');
+        msg.poses.forEach((p, i) => {
+          const x = p.pose.position.x, y = -p.pose.position.y;
+          if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
+        });
+        g.endStroke();
+        if (viewer) viewer.scene.update();
+      });
+  }
+
+  // ── Click anywhere on the map → publish a goal ──
+  function attachClickToGoal() {
+    const canvas = viewer.scene.canvas;
+    canvas.addEventListener('mousedown', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const gx = (e.clientX - rect.left) * (canvas.width / rect.width);
+      const gy = (e.clientY - rect.top)  * (canvas.height / rect.height);
+      // Inverse of the EaselJS scene transform (global = local*scale + translate).
+      const rosX = (gx - viewer.scene.x) / viewer.scene.scaleX;
+      const rosY = (gy - viewer.scene.y) / viewer.scene.scaleY;
+      publishGoal(rosX, rosY, 0.0);
+    });
+  }
+
+  // ── Goal + body command publishers ──
+  function publishGoal(x, y, yaw) {
+    if (!goalPub) return;
+    const goal = new ROSLIB.Message({
+      header: { frame_id: 'map' },
+      pose: {
+        position: { x: x, y: y, z: 0 },
+        orientation: { x: 0, y: 0, z: Math.sin(yaw/2), w: Math.cos(yaw/2) }
+      }
+    });
+    goalPub.publish(goal);
+  }
+  function sendBody(cmd) {
+    if (bodyPub) bodyPub.publish(new ROSLIB.Message({ data: cmd }));
+  }
+
+  // ── Sensors ──
+  function subscribeSensors() {
+    const grid = document.getElementById('us_grid');
+    grid.innerHTML = '';
+    US_SENSORS.forEach((name) => {
+      const cell = document.createElement('div');
+      cell.className = 'sensor'; cell.id = 'us_' + name;
+      cell.innerHTML = '<div>' + name.replace('_',' ') + '</div><div class="v">--</div>';
+      grid.appendChild(cell);
+      new ROSLIB.Topic({ ros, name: '/ultrasonic/' + name, messageType: 'sensor_msgs/Range', throttle_rate: 200 })
+        .subscribe((msg) => {
+          const m = msg.range;
+          const v = cell.querySelector('.v');
+          v.textContent = (m >= msg.max_range) ? '∞' : m.toFixed(2) + ' m';
+          cell.className = 'sensor' + (m < 0.4 ? ' hit' : m < 0.8 ? ' near' : '');
+        });
+    });
+    // Pit obstacles: any points in the cloud means at least one IR sees a drop-off.
+    new ROSLIB.Topic({ ros, name: '/pit_obstacles', messageType: 'sensor_msgs/PointCloud2', throttle_rate: 200 })
+      .subscribe((msg) => {
+        const box = document.getElementById('pit_box');
+        const n = msg.width || 0;
+        if (n > 0) { box.className = 'pit alert'; box.textContent = 'PIT DETECTED (' + n + ')'; }
+        else { box.className = 'pit'; box.textContent = 'Pit sensors: clear'; }
+      });
+  }
+
+  // ── Transcript ──
+  function subscribeTranscript() {
+    const log = document.getElementById('transcript');
+    new ROSLIB.Topic({ ros, name: '/robot/voice/command', messageType: 'std_msgs/String' })
+      .subscribe((msg) => {
+        const row = document.createElement('div');
+        const t = new Date().toLocaleTimeString();
+        row.textContent = t + '  “' + msg.data + '”';
+        log.prepend(row);
+        while (log.childElementCount > 50) log.removeChild(log.lastChild);
+      });
+  }
+
+  // ── UI wiring ──
+  function buildRoomButtons() {
+    const box = document.getElementById('rooms');
+    Object.keys(ROOMS).forEach((name) => {
+      const b = document.createElement('button');
+      b.className = 'btn'; b.textContent = name;
+      b.onclick = () => { const [x,y,yaw] = ROOMS[name]; publishGoal(x, y, yaw); };
+      box.appendChild(b);
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    buildRoomButtons();
+    document.getElementById('connect_btn').onclick = connect;
+    document.querySelectorAll('[data-cmd]').forEach((b) => {
+      b.onclick = () => sendBody(b.getAttribute('data-cmd'));
+    });
+    // Pre-fill IP from ?ip= and auto-connect if present.
+    const q = new URLSearchParams(location.search).get('ip');
+    if (q) { document.getElementById('ip_input').value = q; connect(); }
+  });
+  </script>
 </body>
 </html>

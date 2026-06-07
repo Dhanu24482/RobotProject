@@ -285,6 +285,35 @@ ls -la /dev/rplidar /dev/arduino
 # Both should exist and be readable after plugging in the hardware
 ```
 
+### Install arduino-cli (flash the Arduino from the Pi)
+
+The Arduino firmware lives in this repo at `firmware/omniserv_firmware/` and is
+flashed over the existing USB cable directly from the Pi — no PC or Arduino IDE
+needed. Install `arduino-cli` and the AVR core once:
+
+```bash
+# Install arduino-cli
+curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh
+sudo mv bin/arduino-cli /usr/local/bin/
+
+# Install the AVR core (provides the Mega 2560 board + avrdude + Servo library)
+arduino-cli core update-index
+arduino-cli core install arduino:avr
+```
+
+Flash the firmware (compiles, frees the port, uploads, restarts the node):
+
+```bash
+cd ~/ros2_ws
+./scripts/flash_arduino.sh
+```
+
+> A serial port has a single owner. The flash script stops `arduino_bridge`
+> (which holds `/dev/arduino`) before uploading, then restarts it. If you flash
+> manually, stop the node first or the upload fails with "port busy".
+
+See [firmware/README.md](firmware/README.md) for the full pinout and serial protocol.
+
 ---
 
 ## 8. Configure Audio (Microphone & Speaker)
@@ -350,9 +379,18 @@ The voice node uses Google Gemini 2.5 Flash for natural language Q&A. A free tie
 4. Copy the key and add it to your environment:
 
 ```bash
-echo 'export GEMINI_API_KEY="your_api_key_here"' >> ~/.bashrc
+# Single key:
+echo 'export GEMINI_API_KEYS="your_api_key_here"' >> ~/.bashrc
+# Or several comma-separated keys to enable automatic rotation on rate limits:
+# echo 'export GEMINI_API_KEYS="key1,key2,key3"' >> ~/.bashrc
 source ~/.bashrc
 ```
+
+The voice node reads `GEMINI_API_KEYS` (preferred, comma-separated) and falls
+back to the legacy single `GEMINI_API_KEY` if set.
+
+> **Security:** keys live in environment variables **only** — never commit them
+> to git or write them to a tracked file. If a key is ever exposed, rotate it.
 
 ### Verify the key works
 
@@ -360,7 +398,7 @@ source ~/.bashrc
 python3 -c "
 import os
 from google import genai
-client = genai.Client(api_key=os.environ['GEMINI_API_KEY'])
+client = genai.Client(api_key=os.environ['GEMINI_API_KEYS'].split(',')[0])
 response = client.models.generate_content(model='gemini-2.5-flash', contents='Say hello in one word.')
 print(response.text)
 "
@@ -438,15 +476,23 @@ ros2 run omni_base voice_node
 
 ### Check 4 — Full stack
 
+Everything starts from a single launch file now. To build a map:
+
 ```bash
-./omniserv_boot.sh
+ros2 launch omni_base mapping.launch.py     # (or ./omniserv_boot.sh)
+```
+
+For autonomous navigation on the saved map:
+
+```bash
+ros2 launch omni_base navigation.launch.py use_voice:=true use_web:=true
 ```
 
 Wait ~10 seconds, then confirm all topics are publishing:
 
 ```bash
 ros2 topic list
-# Should include: /scan, /laser/odom, /map, /tf, /tf_static
+# Should include: /scan, /odom, /map, /tf, /tf_static
 ```
 
 ---
@@ -524,8 +570,13 @@ sudo apt install -y ffmpeg mpg123 sox libsox-fmt-all \
 sudo usermod -aG dialout $USER
 cd ~/ros2_ws/src/sllidar_ros2/scripts && sudo ./create_udev_rules.sh
 
-# 7. API key
-echo 'export GEMINI_API_KEY="your_key_here"' >> ~/.bashrc
+# 6b. arduino-cli (flash the Mega from the Pi)
+curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh
+sudo mv bin/arduino-cli /usr/local/bin/
+arduino-cli core update-index && arduino-cli core install arduino:avr
+
+# 7. API key(s) — comma-separated list rotates to dodge rate limits
+echo 'export GEMINI_API_KEYS="key1,key2,key3"' >> ~/.bashrc
 source ~/.bashrc
 
 # 8. Clone and build

@@ -165,4 +165,97 @@
     <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
 
+  <!-- ==================== SENSOR FRAMES ==================== -->
+  <!-- Added for the sensor upgrade. Each sensor's +X axis points along its    -->
+  <!-- sensing direction (Range messages are measured along +X). Mounted low   -->
+  <!-- on the base (z=0.05) so ultrasonics catch obstacles below the laser.    -->
+  <!-- Positions/yaws are approximate - tune to the physical mounts.           -->
+  <material name="sensor_red">
+    <color rgba="0.8 0.1 0.1 1"/>
+  </material>
+
+  <!-- Ultrasonic: 3 front (~120 deg spread) -->
+  <link name="us_front_center">
+    <visual><geometry><box size="0.02 0.04 0.02"/></geometry><material name="sensor_red"/></visual>
+  </link>
+  <joint name="base_to_us_front_center" type="fixed">
+    <parent link="base_link"/><child link="us_front_center"/>
+    <origin xyz="0.30 0.0 0.05" rpy="0 0 0"/>
+  </joint>
+
+  <link name="us_front_left">
+    <visual><geometry><box size="0.02 0.04 0.02"/></geometry><material name="sensor_red"/></visual>
+  </link>
+  <joint name="base_to_us_front_left" type="fixed">
+    <parent link="base_link"/><child link="us_front_left"/>
+    <origin xyz="0.26 0.15 0.05" rpy="0 0 0.6"/>
+  </joint>
+
+  <link name="us_front_right">
+    <visual><geometry><box size="0.02 0.04 0.02"/></geometry><material name="sensor_red"/></visual>
+  </link>
+  <joint name="base_to_us_front_right" type="fixed">
+    <parent link="base_link"/><child link="us_front_right"/>
+    <origin xyz="0.26 -0.15 0.05" rpy="0 0 -0.6"/>
+  </joint>
+
+  <!-- Ultrasonic: 3 rear (for reversing) -->
+  <link name="us_rear_center">
+    <visual><geometry><box size="0.02 0.04 0.02"/></geometry><material name="sensor_red"/></visual>
+  </link>
+  <joint name="base_to_us_rear_center" type="fixed">
+    <parent link="base_link"/><child link="us_rear_center"/>
+    <origin xyz="-0.30 0.0 0.05" rpy="0 0 3.14159"/>
+  </joint>
+
+  <link name="us_rear_left">
+    <visual><geometry><box size="0.02 0.04 0.02"/></geometry><material name="sensor_red"/></visual>
+  </link>
+  <joint name="base_to_us_rear_left" type="fixed">
+    <parent link="base_link"/><child link="us_rear_left"/>
+    <origin xyz="-0.26 0.15 0.05" rpy="0 0 2.54159"/>
+  </joint>
+
+  <link name="us_rear_right">
+    <visual><geometry><box size="0.02 0.04 0.02"/></geometry><material name="sensor_red"/></visual>
+  </link>
+  <joint name="base_to_us_rear_right" type="fixed">
+    <parent link="base_link"/><child link="us_rear_right"/>
+    <origin xyz="-0.26 -0.15 0.05" rpy="0 0 3.74159"/>
+  </joint>
+
+  <!-- IR pit sensors: front/back/left/right, extended from base, facing down -->
+  <!-- +X points down (pitch 90 deg) since they scan the floor for drop-offs.  -->
+  <link name="ir_front">
+    <visual><geometry><box size="0.02 0.02 0.02"/></geometry><material name="sensor_red"/></visual>
+  </link>
+  <joint name="base_to_ir_front" type="fixed">
+    <parent link="base_link"/><child link="ir_front"/>
+    <origin xyz="0.32 0.0 0.05" rpy="0 1.5708 0"/>
+  </joint>
+
+  <link name="ir_back">
+    <visual><geometry><box size="0.02 0.02 0.02"/></geometry><material name="sensor_red"/></visual>
+  </link>
+  <joint name="base_to_ir_back" type="fixed">
+    <parent link="base_link"/><child link="ir_back"/>
+    <origin xyz="-0.32 0.0 0.05" rpy="0 1.5708 0"/>
+  </joint>
+
+  <link name="ir_left">
+    <visual><geometry><box size="0.02 0.02 0.02"/></geometry><material name="sensor_red"/></visual>
+  </link>
+  <joint name="base_to_ir_left" type="fixed">
+    <parent link="base_link"/><child link="ir_left"/>
+    <origin xyz="0.0 0.32 0.05" rpy="0 1.5708 0"/>
+  </joint>
+
+  <link name="ir_right">
+    <visual><geometry><box size="0.02 0.02 0.02"/></geometry><material name="sensor_red"/></visual>
+  </link>
+  <joint name="base_to_ir_right" type="fixed">
+    <parent link="base_link"/><child link="ir_right"/>
+    <origin xyz="0.0 -0.32 0.05" rpy="0 1.5708 0"/>
+  </joint>
+
 </robot>

@@ -1,0 +1,12 @@
+# Canonical room coordinates for voice/web navigation goals.
+# Each entry: room_name: [x_metres, y_metres, yaw_radians] in the map frame.
+# This is the single source of truth — keep the web UI (web_interface/index.html)
+# ROOMS list in sync with these names.
+rooms:
+  "room 1":    [0.703, -0.069, 1.75]
+  "room 2":    [-0.127, -0.235, 3.09]
+  "room 3":    [-0.198, -1.068, 1.83]
+  "room 4":    [-2.0, 1.5, 0.0]
+  "reception": [-1.0, 0.5, 1.57]
+  "lobby":     [0.5, -2.0, 3.14]
+  "home":      [0.0, 0.0, 0.0]

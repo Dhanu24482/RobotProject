@@ -3,6 +3,10 @@
 A ROS 2 (Humble) workspace for a voice-controlled, LiDAR-based autonomous service robot running on a Raspberry Pi. The robot ("Varys") navigates to named rooms, responds to spoken commands, answers questions via a Gemini LLM, and drives a physical differential-drive base plus animatronic head and arms through an Arduino Mega.
 
 > **New to this project?** Start with [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) to install all dependencies before building.
+>
+> **Planned hardware upgrade (not yet installed):** ultrasonic + IR pit sensors are
+> prepared in code/firmware but the physical sensors are not wired yet — see
+> [docs/SENSOR_UPGRADE.md](docs/SENSOR_UPGRADE.md) for status and the install checklist.
 
 ---
 
@@ -57,24 +61,27 @@ A ROS 2 (Humble) workspace for a voice-controlled, LiDAR-based autonomous servic
 ```
 ros2_ws/
 ├── src/
-│   ├── omni_base/               ← custom robot package (original code)
+│   ├── omni_base/               ← custom robot package
 │   │   ├── omni_base/
 │   │   │   ├── arduino_bridge.py
 │   │   │   └── voice_node.py
-│   │   ├── launch/rsp.launch.py
+│   │   ├── launch/              ← description / hardware / mapping / navigation
 │   │   ├── config/
 │   │   │   ├── ekf.yaml
+│   │   │   ├── slam_params.yaml
+│   │   │   ├── rooms.yaml       ← canonical room coordinates
 │   │   │   └── nav2_params.yaml
+│   │   ├── urdf/omniserv.urdf   ← robot URDF model (single source of truth)
 │   │   ├── maps/                ← my_room_map.pgm / .yaml
 │   │   ├── web_interface/index.html
 │   │   ├── package.xml
 │   │   └── setup.py
 │   ├── rf2o_laser_odometry/     ← 3rd-party: laser scan-matching odometry
 │   └── sllidar_ros2/            ← 3rd-party: Slamtec RPLiDAR A1 driver
-├── omniserv.urdf                ← robot URDF model
-├── omniserv_map.pgm             ← saved occupancy-grid map
+├── scripts/                     ← flash_arduino.sh, save_map.sh
+├── omniserv_map.pgm             ← saved occupancy-grid map (legacy duplicate)
 ├── omniserv_map.yaml            ← map metadata (res 0.05 m/px)
-├── omniserv_boot.sh             ← full hardware stack launcher
+├── omniserv_boot.sh             ← mapping entrypoint (calls mapping.launch.py)
 ├── .gitmodules                  ← upstream sources for vendor packages
 └── ENVIRONMENT_SETUP.md         ← full OS + ROS + dependency install guide
 ```
@@ -190,12 +197,12 @@ Requires the `GEMINI_API_KEY` environment variable. Uses `google-genai` with a p
 | Component | Package | Role |
 |-----------|---------|------|
 | LiDAR driver | `sllidar_ros2` | Publishes `/scan` from RPLiDAR A1 on `/dev/rplidar` |
-| Laser odometry | `rf2o_laser_odometry` | Scan-matching → `/laser/odom` |
+| Laser odometry | `rf2o_laser_odometry` | Scan-matching → `/odom` (+ `odom`→`base_link` TF) |
 | SLAM | `slam_toolbox` (async) | Builds live map from `/scan` + odometry |
 | Localization | AMCL (Nav2) | Particle filter, differential motion model |
 | Global planner | NavFn (Nav2) | Dijkstra, 0.5 m goal tolerance |
 | Local planner | DWB (Nav2) | max 0.20–0.26 m/s linear, 0.50 rad/s angular |
-| Sensor fusion | `robot_localization` EKF | Fuses `wheel/odom` + `laser/odom` *(disabled — see notes)* |
+| Sensor fusion | `robot_localization` EKF | Fuses `wheel/odom` + `/odom` *(disabled — see notes)* |
 
 **Nav2 tuning highlights** (`config/nav2_params.yaml`)
 
@@ -274,23 +281,22 @@ source /opt/ros/humble/setup.bash
 colcon build
 source install/setup.bash
 
-# 4. Set your Gemini API key (optional — only needed for AI Q&A)
-export GEMINI_API_KEY="your_key_here"
+# 4. Set your Gemini API key(s) (optional — only needed for AI Q&A)
+#    Comma-separated list enables automatic key rotation on rate limits.
+export GEMINI_API_KEYS="key_one,key_two"
 
-# 5. Launch hardware stack (LiDAR + Arduino + SLAM)
-./omniserv_boot.sh
+# 5a. Build a map (drive with the BT remote, then save):
+ros2 launch omni_base mapping.launch.py
+#    ...in another terminal once the map looks good:
+./scripts/save_map.sh && colcon build --packages-select omni_base
 
-# 6. In a new terminal — launch Nav2
-source /opt/ros/humble/setup.bash && source install/setup.bash
-ros2 launch nav2_bringup navigation_launch.py \
-  use_sim_time:=false \
-  params_file:=$(pwd)/src/omni_base/config/nav2_params.yaml
-
-# 7. In a new terminal — launch voice node
-source /opt/ros/humble/setup.bash && source install/setup.bash
-ros2 run omni_base voice_node
+# 5b. OR run autonomous navigation on the saved map:
+ros2 launch omni_base navigation.launch.py use_voice:=true use_web:=true
 ```
 
+> Everything (LiDAR, Arduino bridge, odometry, robot description, and either
+> SLAM or Nav2) now starts from **one** launch file. See section 8 for details.
+>
 > If this is a fresh system, follow [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) first.
 
 ---
@@ -335,59 +341,82 @@ source install/setup.bash
 
 `--symlink-install` means Python file edits take effect without rebuilding.
 
-### Step 4 — Launch the hardware stack
+### Step 4 — Set Gemini API key(s) (optional)
+
+Get a free key at [aistudio.google.com](https://aistudio.google.com). You can
+supply several comma-separated keys; the voice node rotates to the next one
+when a key hits its rate/quota limit and puts the busy key on a short cooldown.
 
 ```bash
-./omniserv_boot.sh
-```
-
-This starts (all in background):
-
-| # | Process | What it does |
-|---|---------|-------------|
-| 1 | `sllidar_ros2` | Reads RPLiDAR A1, publishes `/scan` |
-| 2 | `arduino_bridge` | Opens `/dev/arduino`, bridges ROS ↔ motors/servos |
-| 3 | `robot_state_publisher` | Publishes TF tree from `omniserv.urdf` |
-| 4 | `rf2o_laser_odometry` | Scan-matches `/scan` → `/laser/odom` |
-| 5 | `slam_toolbox` | Builds live occupancy map |
-
-### Step 5 — Launch Nav2
-
-```bash
-ros2 launch nav2_bringup navigation_launch.py \
-  use_sim_time:=false \
-  params_file:=~/ros2_ws/src/omni_base/config/nav2_params.yaml
-```
-
-Wait until you see `[nav2_bringup] Navigation is ready` in the terminal.
-
-### Step 6 — Set Gemini API key (optional)
-
-Get a free key at [aistudio.google.com](https://aistudio.google.com). Add it permanently:
-
-```bash
-echo 'export GEMINI_API_KEY="your_key_here"' >> ~/.bashrc
+echo 'export GEMINI_API_KEYS="key_one,key_two"' >> ~/.bashrc
 source ~/.bashrc
 ```
 
-### Step 7 — Run the voice node
+> **Security:** API keys live in environment variables **only** — never commit
+> them to git. If a key is ever exposed, rotate/revoke it immediately.
+
+### Step 5 — Build a map (mapping mode)
+
+One command brings up the LiDAR, Arduino bridge, robot description, laser
+odometry, and `slam_toolbox`:
 
 ```bash
-ros2 run omni_base voice_node
+ros2 launch omni_base mapping.launch.py
 ```
 
-You will hear: **"Varys online. Navigation and AI systems ready."**
+This starts:
 
-The robot is now listening. Speak a command.
+| # | Process | What it does |
+|---|---------|-------------|
+| 1 | `robot_state_publisher` | Publishes TF tree from the installed `omniserv.urdf` |
+| 2 | `sllidar_ros2` | Reads RPLiDAR A1, publishes `/scan` |
+| 3 | `rf2o_laser_odometry` | Scan-matches `/scan` → `/odom` (+ `odom`→`base_link` TF) |
+| 4 | `arduino_bridge` | Opens `/dev/arduino`, bridges ROS ↔ motors/servos |
+| 5 | `slam_toolbox` | Builds live occupancy map (provides `map`→`odom`) |
 
-### Step 8 — (Optional) Web interface
+Drive the robot around with the BT remote. When the map looks complete, save it:
 
 ```bash
-# Start the WebSocket bridge
-ros2 launch rosbridge_server rosbridge_websocket_launch.xml
+./scripts/save_map.sh                       # writes src/omni_base/maps/my_room_map.{pgm,yaml}
+colcon build --packages-select omni_base    # installs the updated map
 ```
 
-Then open `src/omni_base/web_interface/index.html` in a browser (with the Pi's IP filled in).
+> The legacy `./omniserv_boot.sh` still works — it now simply calls
+> `ros2 launch omni_base mapping.launch.py`.
+
+### Step 6 — Autonomous navigation (navigation mode)
+
+One command brings up the same hardware plus the full Nav2 stack on the saved map:
+
+```bash
+ros2 launch omni_base navigation.launch.py
+```
+
+Launch arguments:
+
+| Argument | Default | Effect |
+|----------|---------|--------|
+| `use_voice` | `false` | Also start the voice control node |
+| `use_web` | `false` | Also start the `rosbridge_websocket` for the web UI |
+| `map` | installed `maps/my_room_map.yaml` | Map to navigate on |
+| `params_file` | installed `config/nav2_params.yaml` | Nav2 parameters |
+| `lidar_port` | `/dev/rplidar` | RPLiDAR serial port |
+| `arduino_port` | `/dev/arduino` | Arduino serial port |
+
+Typical full run (navigation + voice + web dashboard):
+
+```bash
+ros2 launch omni_base navigation.launch.py use_voice:=true use_web:=true
+```
+
+When the voice node starts you will hear: **"Varys online. Navigation and AI
+systems ready."** The robot is now listening — speak a command.
+
+### Step 7 — (Optional) Web interface
+
+With `use_web:=true` the WebSocket bridge is already running. Open
+`src/omni_base/web_interface/index.html` in a browser (with the Pi's IP filled
+in) for the live map, sensor panels, and click-to-navigate.
 
 ---
 
@@ -441,7 +470,7 @@ ros2 topic pub --once /robot/body/command std_msgs/String "{data: '<CENTER>'}"
 
 ```bash
 ros2 topic echo /scan                        # LiDAR data
-ros2 topic echo /laser/odom                  # rf2o odometry
+ros2 topic echo /odom                        # rf2o odometry
 ros2 topic echo /robot/voice/command         # what voice_node heard
 ros2 topic echo /cmd_vel                     # Nav2 velocity commands
 ros2 topic list                              # all active topics
@@ -497,9 +526,8 @@ ros2 topic list                              # all active topics
 
 ## 11. Maintainer Notes
 
-- **`package.xml` / `setup.py`** have placeholder values (TODO description, license, email) — fill these in before publishing.
-- **Two map files** exist: `omniserv_map.*` at workspace root and `src/omni_base/maps/my_room_map.*`. `nav2_params.yaml` has `yaml_filename: ""` — verify which map is loaded at runtime.
-- **`launch/rsp.launch.py`** looks for the URDF at `share/omni_base/urdf/omniserv.urdf`. The boot script uses `~/ros2_ws/omniserv.urdf` directly. Add the URDF to `data_files` in `setup.py` if you want the launch file path to work.
-- **EKF is disabled** in `omniserv_boot.sh` (line is commented out). Enable it once wheel encoder odometry is wired into the Arduino and publishing on `/wheel/odom`.
-- **Room 4, reception, and lobby** coordinates are rough estimates — measure and update them from the saved map once the environment is finalized.
-- **`src/omni_base_backup/`** is dead code (old `arduino_bridge.py`) and is excluded by `.gitignore`. It can be safely deleted.
+- **Packaging:** `package.xml` / `setup.py` now carry real metadata and runtime `exec_depend`s, and `setup.py` installs `launch/`, `config/`, `urdf/`, and `maps/` into the package share dir, so the launch files resolve resources without absolute `~/ros2_ws/...` paths.
+- **Single source of truth for the URDF:** the model now lives at `src/omni_base/urdf/omniserv.urdf` and is read from the installed share path by `description.launch.py`. The old root-level copy was removed.
+- **Two map files** exist: `omniserv_map.*` at workspace root and `src/omni_base/maps/my_room_map.*` (the one Nav2 loads via `navigation.launch.py`). The root copy is a duplicate and can be removed once confirmed unused.
+- **EKF (`config/ekf.yaml`)** is provided but not launched. Enable it once wheel encoder odometry is wired into the Arduino and publishing on `/wheel/odom`.
+- **Room 4, reception, and lobby** coordinates in `config/rooms.yaml` are rough estimates — measure and update them from the saved map once the environment is finalized. Keep the web UI `ROOMS` list (`web_interface/index.html`) in sync with `config/rooms.yaml`.

@@ -43,9 +43,6 @@ Makefile
 .DS_Store
 Thumbs.db
 
-# ── Project-specific excludes ────────────────────────────────────────────────
-src/omni_base_backup/
-
 # ── Temporary / runtime ──────────────────────────────────────────────────────
 *.tmp
 *.bak
