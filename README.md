@@ -2,6 +2,8 @@
 
 A ROS 2 (Humble) workspace for a voice-controlled, LiDAR-based autonomous service robot running on a Raspberry Pi. The robot ("Varys") navigates to named rooms, responds to spoken commands, answers questions via a Gemini LLM, and drives a physical differential-drive base plus animatronic head and arms through an Arduino Mega.
 
+> **New to this project?** Start with [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) to install all dependencies before building.
+
 ---
 
 ## Table of Contents
@@ -12,11 +14,13 @@ A ROS 2 (Humble) workspace for a voice-controlled, LiDAR-based autonomous servic
    - [arduino_bridge](#31-arduino_bridge)
    - [voice_node (Varys)](#32-voice_node--varys)
 4. [Localization, Mapping & Navigation](#4-localization-mapping--navigation)
-5. [Robot Model (URDF)](#5-robot-model-urdfurdf)
+5. [Robot Model (URDF)](#5-robot-model-urdf)
 6. [Web Interface](#6-web-interface)
-7. [How to Build & Run](#7-how-to-build--run)
-8. [Key External Dependencies](#8-key-external-dependencies)
-9. [Maintainer Notes](#9-maintainer-notes)
+7. [Quick Start — Clone & Run](#7-quick-start--clone--run)
+8. [Full Run Guide](#8-full-run-guide)
+9. [Manual Testing Commands](#9-manual-testing-commands)
+10. [Key External Dependencies](#10-key-external-dependencies)
+11. [Maintainer Notes](#11-maintainer-notes)
 
 ---
 
@@ -65,15 +69,15 @@ ros2_ws/
 │   │   ├── web_interface/index.html
 │   │   ├── package.xml
 │   │   └── setup.py
-│   ├── rf2o_laser_odometry/     ← 3rd-party laser odometry
-│   └── sllidar_ros2/            ← 3rd-party RPLiDAR driver + SDK
+│   ├── rf2o_laser_odometry/     ← 3rd-party: laser scan-matching odometry
+│   └── sllidar_ros2/            ← 3rd-party: Slamtec RPLiDAR A1 driver
 ├── omniserv.urdf                ← robot URDF model
 ├── omniserv_map.pgm             ← saved occupancy-grid map
 ├── omniserv_map.yaml            ← map metadata (res 0.05 m/px)
-└── omniserv_boot.sh             ← full hardware stack launcher
+├── omniserv_boot.sh             ← full hardware stack launcher
+├── .gitmodules                  ← upstream sources for vendor packages
+└── ENVIRONMENT_SETUP.md         ← full OS + ROS + dependency install guide
 ```
-
-> `src/omni_base_backup/` is a legacy copy of `arduino_bridge.py` and is **not** part of the build.
 
 ---
 
@@ -83,7 +87,7 @@ ros2_ws/
 
 **File:** `src/omni_base/omni_base/arduino_bridge.py`
 
-Translates ROS messages into serial commands for the Arduino Mega (`/dev/arduino`, 115 200 baud).
+Translates ROS messages into serial commands for the Arduino Mega on `/dev/arduino` at 115 200 baud.
 
 **Subscriptions**
 
@@ -99,8 +103,8 @@ left_pwm  = linear_x − angular_z × (wheel_separation / 2)
 right_pwm = linear_x + angular_z × (wheel_separation / 2)
 ```
 
-- `wheel_separation` = 0.35 m, `max_speed` = 1.0 m/s, `max_pwm` = 60, `min_pwm` = 45 (deadband clamp).
-- Formatted as `<L,R>\n` over serial.
+- `wheel_separation` = 0.35 m, `max_speed` = 1.0 m/s, `max_pwm` = 60, `min_pwm` = 45 (deadband clamp)
+- Sent to Arduino as `<L,R>\n`
 
 **`/robot/body/command` accepted strings**
 
@@ -109,10 +113,10 @@ right_pwm = linear_x + angular_z × (wheel_separation / 2)
 | Direct PWM | `60,60` or `<-20,-20>` | Immediate motor command |
 | Drive shortcut | `FORWARD`, `BACKWARD`, `LEFT`, `RIGHT` | Timed drive (2–2.5 s) in background thread |
 | Stop | `STOP` | Sends `<0,0>` immediately |
-| Servo/animation | `NOD`, `SHAKE`, `EBLINK`, `CENTER`, `WAVE:L`, `WAVE:R` | Forwarded as `<CMD>` |
-| Servo pose | `HP:`, `EL:`, `ER:`, `EY:`, `HL:`, `HR:`, `HANDS:` | Forwarded as `<CMD>` |
+| Servo / animation | `NOD`, `SHAKE`, `EBLINK`, `CENTER`, `WAVE:L`, `WAVE:R` | Forwarded as `<CMD>` |
+| Servo pose prefix | `HP:`, `EL:`, `ER:`, `EY:`, `HL:`, `HR:`, `HANDS:` | Forwarded as `<CMD>` |
 
-Timed drive runs at **10 Hz** to keep the Arduino watchdog alive. On shutdown, `<0,0>` is sent to stop the motors.
+Timed drive pulses the Arduino at **10 Hz** to keep its watchdog alive. On node shutdown, `<0,0>` is always sent to stop the motors.
 
 ---
 
@@ -127,10 +131,10 @@ The robot's brain: continuous microphone listener → speech-to-text → command
 | Topic | Type | Description |
 |-------|------|-------------|
 | `/goal_pose` | `geometry_msgs/PoseStamped` | Nav2 navigation goal |
-| `/robot/body/command` | `std_msgs/String` | Arduino body commands |
-| `/robot/voice/command` | `std_msgs/String` | Raw recognized speech |
-| `/robot/head/pose` | `std_msgs/Float32MultiArray` | Head servo target |
-| `/robot/hands/pose` | `std_msgs/Float32MultiArray` | Hands servo target |
+| `/robot/body/command` | `std_msgs/String` | Arduino body/servo commands |
+| `/robot/voice/command` | `std_msgs/String` | Raw recognized speech text |
+| `/robot/head/pose` | `std_msgs/Float32MultiArray` | Head servo target pose |
+| `/robot/hands/pose` | `std_msgs/Float32MultiArray` | Hands servo target pose |
 
 **Routing flow**
 
@@ -146,6 +150,17 @@ Microphone → Google STT → text
                                                         └─ Gemini 2.5 Flash → speak()
 ```
 
+**Supported voice commands**
+
+| Category | Example phrases |
+|----------|----------------|
+| Navigation | "go to room 1", "navigate to reception", "take me to lobby", "go home" |
+| Movement | "go forward", "move back", "turn left", "turn right", "stop" |
+| Head / body | "look left", "look right", "look forward", "nod", "shake", "blink", "wink" |
+| Arms | "wave", "wave left", "wave right", "hands up", "hands down" |
+| Reset | "reset", "center" |
+| AI question | anything else → answered by Gemini |
+
 **Known room coordinates** (`map` frame)
 
 | Room | x (m) | y (m) | yaw (rad) |
@@ -158,63 +173,62 @@ Microphone → Google STT → text
 | lobby | 0.5 | -2.0 | 3.14 |
 | home | 0.0 | 0.0 | 0.0 |
 
-**TTS engine** (auto-detected, degrades gracefully)
+**TTS engine** (auto-detected at startup, degrades gracefully)
 
-1. **gTTS** — online, British English, post-processed with `ffmpeg` (volume + 2 kHz EQ boost), played via `aplay`
-2. **pico2wave + sox** — offline, pitch-shifted −300 cents, 0.95× tempo (engineered "male" voice)
-3. **espeak** — last-resort fallback
+1. **gTTS** — online, British English, post-processed with `ffmpeg` EQ, played via `aplay`
+2. **pico2wave + sox** — offline, pitch-shifted −300 cents, 0.95× tempo ("engineered male" voice)
+3. **espeak** — last-resort fallback (always available)
 
 **AI integration**
 
-Requires `GEMINI_API_KEY` environment variable. Uses `google-genai` with a persistent chat session (`gemini-2.5-flash`). The system instruction keeps answers short (≤ 2 sentences) and in-character as "Varys the robot". Without a key the node still runs fully; AI queries return a graceful "unavailable" message.
+Requires the `GEMINI_API_KEY` environment variable. Uses `google-genai` with a persistent chat session (`gemini-2.5-flash`). System prompt keeps answers ≤ 2 sentences and in-character as "Varys the robot". The node starts and works fully without the key; only open-ended AI questions are degraded.
 
 ---
 
 ## 4. Localization, Mapping & Navigation
 
-| Component | Package | Topic / Role |
-|-----------|---------|--------------|
-| LiDAR driver | `sllidar_ros2` | `/scan` (RPLiDAR A1, `/dev/rplidar`) |
-| Laser odometry | `rf2o_laser_odometry` | `/scan → /laser/odom` (scan matching) |
-| SLAM | `slam_toolbox` (async) | `/scan + /laser/odom → /map` |
+| Component | Package | Role |
+|-----------|---------|------|
+| LiDAR driver | `sllidar_ros2` | Publishes `/scan` from RPLiDAR A1 on `/dev/rplidar` |
+| Laser odometry | `rf2o_laser_odometry` | Scan-matching → `/laser/odom` |
+| SLAM | `slam_toolbox` (async) | Builds live map from `/scan` + odometry |
 | Localization | AMCL (Nav2) | Particle filter, differential motion model |
-| Global planner | NavFn (Nav2) | Dijkstra, 0.5 m tolerance |
+| Global planner | NavFn (Nav2) | Dijkstra, 0.5 m goal tolerance |
 | Local planner | DWB (Nav2) | max 0.20–0.26 m/s linear, 0.50 rad/s angular |
-| Sensor fusion | `robot_localization` EKF | `wheel/odom` + `laser/odom` → fused odometry |
-
-> The EKF launch line is **commented out** in `omniserv_boot.sh`; rf2o odometry is currently used directly without fusion.
+| Sensor fusion | `robot_localization` EKF | Fuses `wheel/odom` + `laser/odom` *(disabled — see notes)* |
 
 **Nav2 tuning highlights** (`config/nav2_params.yaml`)
-- Robot radius: 0.32 m; inflation radius: 0.55 m
-- Controller frequency: 20 Hz; costmap update: 10 Hz (local) / 1 Hz (global)
+
+- Robot radius: 0.32 m · Inflation radius: 0.55 m
+- Controller: 20 Hz · Local costmap: 10 Hz · Global costmap: 1 Hz
 - DWB critics: `RotateToGoal`, `PathAlign`, `GoalAlign`, `PathDist`, `GoalDist`, `BaseObstacle`, `Oscillation`
 - Goal tolerance: 0.25 m (xy), 0.25 rad (yaw)
 
 **Saved map** (`omniserv_map.yaml`)
-- Resolution: 0.05 m/px; origin: (−9.34, −2.26, 0); occupied threshold: 0.65
+- Resolution: 0.05 m/px · Origin: (−9.34, −2.26, 0) · Occupied threshold: 0.65
 
 ---
 
 ## 5. Robot Model (URDF)
 
-**File:** `omniserv.urdf`  Robot name: `omniserv`
+**File:** `omniserv.urdf` · Robot name: `omniserv`
 
 ```
-base_link (root — 0.30 m radius cylinder)
-├── base_footprint          (fixed, zero offset)
-├── laser                   (fixed, z=+0.15 m, yaw=180° to correct front/back)
-└── pedestal_link
-    └── torso_link  (0.15 × 0.30 × 0.40 m box)
-        ├── head_link   (0.10 × 0.20 × 0.15 m, screen-blue)
-        │   ├── left_eye   (r=0.02 m sphere, glowing yellow)
-        │   └── right_eye  (r=0.02 m sphere, glowing yellow)
-        ├── left_arm   (r=0.04 m cylinder, 0.4 m long)
-        └── right_arm  (r=0.04 m cylinder, 0.4 m long)
+base_link  (root — ⌀0.60 m cylinder, h=0.15 m)
+├── base_footprint   (fixed, zero offset)
+├── laser            (fixed, z=+0.15 m, yaw=180° — corrects front/back)
+└── pedestal_link    (⌀0.08 m, h=0.20 m)
+    └── torso_link   (0.15 × 0.30 × 0.40 m box)
+        ├── head_link      (0.10 × 0.20 × 0.15 m, screen-blue)
+        │   ├── left_eye   (r=0.02 m, glowing yellow)
+        │   └── right_eye  (r=0.02 m, glowing yellow)
+        ├── left_arm       (⌀0.08 m cylinder, 0.40 m long)
+        └── right_arm      (⌀0.08 m cylinder, 0.40 m long)
 ```
 
-Key design decisions captured in URDF comments:
+Key design decisions:
 - `base_link` is the TF **root** so rf2o's `odom → base_link` transform works without conflicts.
-- Laser is yaw-rotated **180°** to align physical sensor mounting with ROS convention.
+- Laser yaw-rotated **180°** to match physical sensor mounting direction.
 
 ---
 
@@ -222,102 +236,270 @@ Key design decisions captured in URDF comments:
 
 **File:** `src/omni_base/web_interface/index.html`
 
-A standalone browser dashboard that renders the live Nav2 global costmap using **roslibjs** + **ros2djs**.
+A standalone browser dashboard that renders the live Nav2 global costmap in real time using **roslibjs** + **ros2djs**. Open it from any device on the same Wi-Fi network as the Pi.
 
-**Setup:**
-1. Install and run `rosbridge_suite` on the Pi (not started by `omniserv_boot.sh`):
+**Setup steps:**
+
+1. Install `rosbridge_suite` (already included in the ROS Humble desktop install):
    ```bash
+   sudo apt install ros-humble-rosbridge-suite
+   ```
+
+2. Start the WebSocket bridge on the Pi:
+   ```bash
+   source /opt/ros/humble/setup.bash
    ros2 launch rosbridge_server rosbridge_websocket_launch.xml
    ```
-2. Edit `index.html` line: `url : 'ws://raspberrypi_ip_address:9090'` → replace with the Pi's actual IP.
-3. Open the HTML file in any browser on the same network.
+
+3. Edit `index.html` — replace `raspberrypi_ip_address` with the Pi's actual IP:
+   ```js
+   url : 'ws://192.168.1.XXX:9090'
+   ```
+
+4. Open `index.html` in any browser on the same network.
 
 ---
 
-## 7. How to Build & Run
+## 7. Quick Start — Clone & Run
 
-### Build
+```bash
+# 1. Clone the repository
+git clone https://github.com/Dhanu24482/RobotProject.git ~/ros2_ws
+cd ~/ros2_ws
+
+# 2. Source ROS 2
+source /opt/ros/humble/setup.bash
+
+# 3. Build
+colcon build
+source install/setup.bash
+
+# 4. Set your Gemini API key (optional — only needed for AI Q&A)
+export GEMINI_API_KEY="your_key_here"
+
+# 5. Launch hardware stack (LiDAR + Arduino + SLAM)
+./omniserv_boot.sh
+
+# 6. In a new terminal — launch Nav2
+source /opt/ros/humble/setup.bash && source install/setup.bash
+ros2 launch nav2_bringup navigation_launch.py \
+  use_sim_time:=false \
+  params_file:=$(pwd)/src/omni_base/config/nav2_params.yaml
+
+# 7. In a new terminal — launch voice node
+source /opt/ros/humble/setup.bash && source install/setup.bash
+ros2 run omni_base voice_node
+```
+
+> If this is a fresh system, follow [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) first.
+
+---
+
+## 8. Full Run Guide
+
+### Step 1 — Source the workspace
+
+Add this to `~/.bashrc` so it loads automatically in every terminal:
+
+```bash
+echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc
+echo "source ~/ros2_ws/install/setup.bash" >> ~/.bashrc
+source ~/.bashrc
+```
+
+### Step 2 — Set device permissions
+
+The RPLiDAR and Arduino need serial port access. Run once after each reboot, or make permanent with udev rules:
+
+```bash
+# Temporary (resets on reboot)
+sudo chmod 666 /dev/rplidar
+sudo chmod 666 /dev/arduino
+
+# Permanent udev rules (run once)
+cd ~/ros2_ws/src/sllidar_ros2/scripts
+sudo ./create_udev_rules.sh
+# Then create a similar rule for Arduino:
+echo 'SUBSYSTEM=="tty", ATTRS{product}=="Arduino Mega 2560", SYMLINK+="arduino"' \
+  | sudo tee /etc/udev/rules.d/99-arduino.rules
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+### Step 3 — Build the workspace
 
 ```bash
 cd ~/ros2_ws
-colcon build
+colcon build --symlink-install
 source install/setup.bash
 ```
 
-### Launch the full hardware stack
+`--symlink-install` means Python file edits take effect without rebuilding.
+
+### Step 4 — Launch the hardware stack
 
 ```bash
 ./omniserv_boot.sh
 ```
 
-Starts (all backgrounded, in order):
-1. RPLiDAR A1 driver (`/dev/rplidar`)
-2. `arduino_bridge` (`/dev/arduino`)
-3. `robot_state_publisher` (URDF)
-4. `rf2o_laser_odometry`
-5. `slam_toolbox` (async SLAM)
+This starts (all in background):
 
-### Launch Nav2
+| # | Process | What it does |
+|---|---------|-------------|
+| 1 | `sllidar_ros2` | Reads RPLiDAR A1, publishes `/scan` |
+| 2 | `arduino_bridge` | Opens `/dev/arduino`, bridges ROS ↔ motors/servos |
+| 3 | `robot_state_publisher` | Publishes TF tree from `omniserv.urdf` |
+| 4 | `rf2o_laser_odometry` | Scan-matches `/scan` → `/laser/odom` |
+| 5 | `slam_toolbox` | Builds live occupancy map |
+
+### Step 5 — Launch Nav2
 
 ```bash
 ros2 launch nav2_bringup navigation_launch.py \
-  params_file:=src/omni_base/config/nav2_params.yaml
+  use_sim_time:=false \
+  params_file:=~/ros2_ws/src/omni_base/config/nav2_params.yaml
 ```
 
-### Run the voice assistant
+Wait until you see `[nav2_bringup] Navigation is ready` in the terminal.
+
+### Step 6 — Set Gemini API key (optional)
+
+Get a free key at [aistudio.google.com](https://aistudio.google.com). Add it permanently:
 
 ```bash
-export GEMINI_API_KEY="your_key_here"
+echo 'export GEMINI_API_KEY="your_key_here"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+### Step 7 — Run the voice node
+
+```bash
 ros2 run omni_base voice_node
 ```
 
-> The voice node can run with or without the API key. Without it, speech navigation and body commands still work fully; only open-ended Q&A is disabled.
+You will hear: **"Varys online. Navigation and AI systems ready."**
 
-### Manual body commands (testing without voice)
+The robot is now listening. Speak a command.
+
+### Step 8 — (Optional) Web interface
 
 ```bash
-# Navigate to room 1 via Nav2
+# Start the WebSocket bridge
+ros2 launch rosbridge_server rosbridge_websocket_launch.xml
+```
+
+Then open `src/omni_base/web_interface/index.html` in a browser (with the Pi's IP filled in).
+
+---
+
+## 9. Manual Testing Commands
+
+Test individual subsystems without the voice node using `ros2 topic pub`.
+
+### Navigation
+
+```bash
+# Go to room 1
 ros2 topic pub --once /goal_pose geometry_msgs/PoseStamped \
   "{header: {frame_id: 'map'}, pose: {position: {x: 0.703, y: -0.069}, orientation: {z: 0.812, w: 0.584}}}"
 
-# Drive forward for 2 s
-ros2 topic pub --once /robot/body/command std_msgs/String "{data: 'FORWARD'}"
+# Go home (origin)
+ros2 topic pub --once /goal_pose geometry_msgs/PoseStamped \
+  "{header: {frame_id: 'map'}, pose: {position: {x: 0.0, y: 0.0}, orientation: {w: 1.0}}}"
+```
 
-# Make the robot nod
+### Drive commands
+
+```bash
+ros2 topic pub --once /robot/body/command std_msgs/String "{data: 'FORWARD'}"
+ros2 topic pub --once /robot/body/command std_msgs/String "{data: 'BACKWARD'}"
+ros2 topic pub --once /robot/body/command std_msgs/String "{data: 'LEFT'}"
+ros2 topic pub --once /robot/body/command std_msgs/String "{data: 'RIGHT'}"
+ros2 topic pub --once /robot/body/command std_msgs/String "{data: 'STOP'}"
+```
+
+### Direct PWM
+
+```bash
+# Both motors forward at PWM 50
+ros2 topic pub --once /robot/body/command std_msgs/String "{data: '50,50'}"
+
+# Spin in place
+ros2 topic pub --once /robot/body/command std_msgs/String "{data: '-50,50'}"
+```
+
+### Servo / animation
+
+```bash
 ros2 topic pub --once /robot/body/command std_msgs/String "{data: '<NOD>'}"
+ros2 topic pub --once /robot/body/command std_msgs/String "{data: '<SHAKE>'}"
+ros2 topic pub --once /robot/body/command std_msgs/String "{data: '<WAVE:R>'}"
+ros2 topic pub --once /robot/body/command std_msgs/String "{data: '<EBLINK>'}"
+ros2 topic pub --once /robot/body/command std_msgs/String "{data: '<CENTER>'}"
+```
+
+### Monitor topics
+
+```bash
+ros2 topic echo /scan                        # LiDAR data
+ros2 topic echo /laser/odom                  # rf2o odometry
+ros2 topic echo /robot/voice/command         # what voice_node heard
+ros2 topic echo /cmd_vel                     # Nav2 velocity commands
+ros2 topic list                              # all active topics
 ```
 
 ---
 
-## 8. Key External Dependencies
+## 10. Key External Dependencies
 
-**ROS 2 packages**
-- `rclpy`, `nav2_bringup`, `slam_toolbox`, `robot_localization`, `robot_state_publisher`, `rosbridge_suite`
+### ROS 2 packages
 
-**Python libraries**
-- `pyserial` — Arduino serial communication
-- `SpeechRecognition` — microphone capture + Google STT
-- `google-genai` — Gemini 2.5 Flash API
-- `gTTS` — Google Text-to-Speech
+| Package | Role |
+|---------|------|
+| `ros-humble-desktop` | Base ROS 2 + tools |
+| `ros-humble-navigation2` | Nav2 full stack |
+| `ros-humble-nav2-bringup` | Nav2 launch files |
+| `ros-humble-slam-toolbox` | SLAM mapping |
+| `ros-humble-robot-localization` | EKF sensor fusion |
+| `ros-humble-robot-state-publisher` | URDF → TF |
+| `ros-humble-rosbridge-suite` | WebSocket bridge for web UI |
 
-**System tools**
-- `mpg123`, `ffmpeg`, `aplay` — audio playback pipeline
-- `pico2wave`, `sox` — offline TTS voice synthesis
-- `espeak` — last-resort TTS fallback
+### Python libraries
 
-**Hardware**
-- Raspberry Pi (runs ROS 2 Humble)
-- Arduino Mega — motor driver + servo controller (`/dev/arduino`)
-- Slamtec RPLiDAR A1 (`/dev/rplidar`)
-- USB microphone + speaker
+| Package | Version | Role |
+|---------|---------|------|
+| `pyserial` | 3.5 | Arduino serial communication |
+| `SpeechRecognition` | 3.16+ | Microphone + Google STT |
+| `google-genai` | 2.8+ | Gemini 2.5 Flash API |
+| `gTTS` | 2.5+ | Google Text-to-Speech |
+
+### System tools
+
+| Tool | Package | Role |
+|------|---------|------|
+| `ffmpeg` | `ffmpeg` | TTS audio post-processing |
+| `aplay` | `alsa-utils` | Audio playback |
+| `mpg123` | `mpg123` | MP3 playback |
+| `pico2wave` | `libttspico-utils` | Offline TTS synthesis |
+| `sox` | `sox` | Audio pitch/tempo shifting |
+| `espeak` | `espeak` | Last-resort TTS fallback |
+
+### Hardware
+
+| Component | Interface | Description |
+|-----------|-----------|-------------|
+| Raspberry Pi | — | Runs ROS 2 Humble (Ubuntu 22.04) |
+| Arduino Mega 2560 | `/dev/arduino` (USB serial, 115200) | Motor driver + servo controller |
+| Slamtec RPLiDAR A1 | `/dev/rplidar` (USB serial) | 360° laser scanner |
+| USB microphone | ALSA default input | Voice command capture |
+| USB / 3.5 mm speaker | ALSA default output | TTS audio playback |
 
 ---
 
-## 9. Maintainer Notes
+## 11. Maintainer Notes
 
-- **`package.xml` / `setup.py` metadata** are placeholder values ("TODO"). Fill in description, license, and maintainer email before publishing.
-- **Two map files** exist: `omniserv_map.*` at workspace root and `src/omni_base/maps/my_room_map.*`. The `nav2_params.yaml` `map_server.yaml_filename` field is blank — verify which map is actually loaded at runtime.
-- **`launch/rsp.launch.py`** reads the URDF from `share/omni_base/urdf/omniserv.urdf`. The boot script instead passes `~/ros2_ws/omniserv.urdf` directly; the launch file path may not exist after `colcon install` unless the URDF is added to `data_files` in `setup.py`.
-- **EKF is disabled** (`# ros2 run robot_localization ekf_node ...` in `omniserv_boot.sh`). Enable it once wheel encoder odometry is wired into the Arduino.
-- **Room 4, reception, and lobby** coordinates look like rough placeholders compared to the survey-accurate rooms 1–3; measure and update once the map is finalized.
-- **`src/omni_base_backup/`** is dead code; consider deleting it.
+- **`package.xml` / `setup.py`** have placeholder values (TODO description, license, email) — fill these in before publishing.
+- **Two map files** exist: `omniserv_map.*` at workspace root and `src/omni_base/maps/my_room_map.*`. `nav2_params.yaml` has `yaml_filename: ""` — verify which map is loaded at runtime.
+- **`launch/rsp.launch.py`** looks for the URDF at `share/omni_base/urdf/omniserv.urdf`. The boot script uses `~/ros2_ws/omniserv.urdf` directly. Add the URDF to `data_files` in `setup.py` if you want the launch file path to work.
+- **EKF is disabled** in `omniserv_boot.sh` (line is commented out). Enable it once wheel encoder odometry is wired into the Arduino and publishing on `/wheel/odom`.
+- **Room 4, reception, and lobby** coordinates are rough estimates — measure and update them from the saved map once the environment is finalized.
+- **`src/omni_base_backup/`** is dead code (old `arduino_bridge.py`) and is excluded by `.gitignore`. It can be safely deleted.
