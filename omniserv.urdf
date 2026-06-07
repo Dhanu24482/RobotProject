@@ -1,0 +1,168 @@
+<?xml version="1.0"?>
+<robot name="omniserv">
+
+  <!-- ==================== MATERIALS ==================== -->
+  <material name="white">
+    <color rgba="1 1 1 1"/>
+  </material>
+  <material name="black">
+    <color rgba="0.1 0.1 0.1 1"/>
+  </material>
+  <material name="screen_blue">
+    <color rgba="0.2 0.5 0.8 1"/>
+  </material>
+  <material name="eye_glow">
+    <color rgba="0.9 0.9 0.1 1"/>
+  </material>
+
+  <!-- ==================== BASE LINK (ROOT) ==================== -->
+  <!-- FIX 2: base_link is now the ROOT link.                     -->
+  <!-- rf2o publishes odom -> base_link, so base_link must be     -->
+  <!-- the root. base_footprint is now a CHILD of base_link.      -->
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <cylinder radius="0.30" length="0.15"/>
+      </geometry>
+      <origin xyz="0 0 0.075" rpy="0 0 0"/>
+      <material name="white"/>
+    </visual>
+  </link>
+
+  <!-- FIX 2: base_footprint is now a child of base_link -->
+  <!-- This eliminates the two-parent conflict on base_link -->
+  <link name="base_footprint"/>
+  <joint name="base_to_footprint" type="fixed">
+    <parent link="base_link"/>
+    <child link="base_footprint"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ==================== LASER ==================== -->
+  <link name="laser">
+    <visual>
+      <geometry>
+        <cylinder radius="0.035" length="0.04"/>
+      </geometry>
+      <material name="black"/>
+    </visual>
+  </link>
+
+  <!-- FIX 1: yaw rotated 180 degrees (3.14159) to swap front/back -->
+  <joint name="base_to_laser" type="fixed">
+    <parent link="base_link"/>
+    <child link="laser"/>
+    <origin xyz="0 0 0.15" rpy="0 0 3.14159"/>
+  </joint>
+
+  <!-- ==================== PEDESTAL ==================== -->
+  <link name="pedestal_link">
+    <visual>
+      <geometry>
+        <cylinder radius="0.04" length="0.2"/>
+      </geometry>
+      <origin xyz="0 0 0.25" rpy="0 0 0"/>
+      <material name="white"/>
+    </visual>
+  </link>
+  <joint name="base_to_pedestal" type="fixed">
+    <parent link="base_link"/>
+    <child link="pedestal_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ==================== TORSO ==================== -->
+  <link name="torso_link">
+    <visual>
+      <geometry>
+        <box size="0.15 0.3 0.4"/>
+      </geometry>
+      <origin xyz="0 0 0.55" rpy="0 0 0"/>
+      <material name="white"/>
+    </visual>
+  </link>
+  <joint name="pedestal_to_torso" type="fixed">
+    <parent link="pedestal_link"/>
+    <child link="torso_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ==================== HEAD ==================== -->
+  <link name="head_link">
+    <visual>
+      <geometry>
+        <box size="0.1 0.2 0.15"/>
+      </geometry>
+      <origin xyz="0 0 0.85" rpy="0 0 0"/>
+      <material name="screen_blue"/>
+    </visual>
+  </link>
+  <joint name="torso_to_head" type="fixed">
+    <parent link="torso_link"/>
+    <child link="head_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ==================== EYES ==================== -->
+  <link name="left_eye">
+    <visual>
+      <geometry>
+        <sphere radius="0.02"/>
+      </geometry>
+      <origin xyz="0.055 0.04 0.88" rpy="0 0 0"/>
+      <material name="eye_glow"/>
+    </visual>
+  </link>
+  <joint name="head_to_left_eye" type="fixed">
+    <parent link="head_link"/>
+    <child link="left_eye"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <link name="right_eye">
+    <visual>
+      <geometry>
+        <sphere radius="0.02"/>
+      </geometry>
+      <origin xyz="0.055 -0.04 0.88" rpy="0 0 0"/>
+      <material name="eye_glow"/>
+    </visual>
+  </link>
+  <joint name="head_to_right_eye" type="fixed">
+    <parent link="head_link"/>
+    <child link="right_eye"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ==================== ARMS ==================== -->
+  <link name="left_arm">
+    <visual>
+      <geometry>
+        <cylinder radius="0.04" length="0.4"/>
+      </geometry>
+      <origin xyz="0 0.22 0.6" rpy="0.2 0 0"/>
+      <material name="white"/>
+    </visual>
+  </link>
+  <joint name="torso_to_l_arm" type="fixed">
+    <parent link="torso_link"/>
+    <child link="left_arm"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <link name="right_arm">
+    <visual>
+      <geometry>
+        <cylinder radius="0.04" length="0.4"/>
+      </geometry>
+      <origin xyz="0 -0.22 0.6" rpy="-0.2 0 0"/>
+      <material name="white"/>
+    </visual>
+  </link>
+  <joint name="torso_to_r_arm" type="fixed">
+    <parent link="torso_link"/>
+    <child link="right_arm"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+</robot>

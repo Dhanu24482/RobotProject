@@ -1,0 +1,54 @@
+# ── ROS 2 colcon build artifacts ─────────────────────────────────────────────
+build/
+install/
+log/
+
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+*.egg
+.eggs/
+
+# ── C / C++ ──────────────────────────────────────────────────────────────────
+*.o
+*.so
+*.a
+*.out
+
+# ── CMake ────────────────────────────────────────────────────────────────────
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+!src/**/CMakeLists.txt
+
+# ── Environment / secrets ────────────────────────────────────────────────────
+.env
+*.env.*
+*.key
+
+# ── IDE / editor ─────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── OS files ─────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Project-specific excludes ────────────────────────────────────────────────
+src/omni_base_backup/
+
+# ── Temporary / runtime ──────────────────────────────────────────────────────
+*.tmp
+*.bak
+*.log
+*.bag
+*.db3

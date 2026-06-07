@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>OmniServ Live Map</title>
+    
+    <script src="https://static.robotwebtools.org/EventEmitter2/current/eventemitter2.min.js"></script>
+    <script src="https://static.robotwebtools.org/roslibjs/current/roslib.min.js"></script>
+    <script src="https://static.robotwebtools.org/EaselJS/current/easeljs.min.js"></script>
+    <script src="https://static.robotwebtools.org/ros2djs/current/ros2d.min.js"></script>
+
+    <script type="text/javascript">
+        function init() {
+            // 1. Connect to the ROS 2 WebSocket on the Raspberry Pi
+            // REPLACE 'raspberrypi_ip_address' with your Pi's actual IP on the Wi-Fi
+            var ros = new ROSLIB.Ros({
+                url : 'ws://raspberrypi_ip_address:9090'
+            });
+
+            ros.on('connection', function() {
+                console.log('Connected to OmniServ websocket server.');
+            });
+
+            ros.on('error', function(error) {
+                console.log('Error connecting to websocket server: ', error);
+            });
+
+            ros.on('close', function() {
+                console.log('Connection to websocket server closed.');
+            });
+
+            // 2. Create the 2D Map Viewer in the HTML div below
+            var viewer = new ROS2D.Viewer({
+                divID : 'map_canvas',
+                width : 600,
+                height : 600
+            });
+
+            // 3. Subscribe to the dynamically updating global costmap
+            var gridClient = new ROS2D.OccupancyGridClient({
+                ros : ros,
+                rootObject : viewer.scene,
+                topic : '/global_costmap/costmap', // Subscribing to the live obstacle map
+                continuous : true // TRUE means it will update simultaneously as the robot moves
+            });
+
+            // 4. Scale the canvas to fit the map once it loads
+            gridClient.on('change', function() {
+                viewer.scaleToDimensions(gridClient.currentGrid.width, gridClient.currentGrid.height);
+                viewer.shift(gridClient.currentGrid.pose.position.x, gridClient.currentGrid.pose.position.y);
+            });
+        }
+    </script>
+</head>
+<body onload="init()">
+    <h1>OmniServ Autonomous Navigation Feed</h1>
+    <div id="map_canvas" style="border: 2px solid black; width: 600px; height: 600px;"></div>
+</body>
+</html>
