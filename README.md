@@ -1,7 +1,7 @@
 # OmniServ / "Varys" — Autonomous Reception Robot
 
 A ROS 2 (Humble) workspace for a voice-controlled, LiDAR-based autonomous service robot running on a Raspberry Pi. The robot ("Varys") navigates to named rooms, responds to spoken commands, answers questions via a Gemini LLM, and drives a physical differential-drive base plus animatronic head and arms through an Arduino Mega.
- 
+
 > **New to this project?** Start with [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) to install all dependencies before building.
 >
 > **Planned hardware upgrade (not yet installed):** ultrasonic + IR pit sensors are
