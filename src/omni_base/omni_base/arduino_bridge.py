@@ -40,12 +40,14 @@ class ArduinoBridge(Node):
 
         # Declared ROS params — defaults preserve the previous hardcoded values,
         # so behavior is identical out of the box.
+        # Note: min_pwm (deadband) is kept well below max_pwm so that low-speed
+        # commands remain usable and the full 0..max_pwm range is reachable.
         self.serial_port      = self.declare_parameter('serial_port', '/dev/arduino').value
         self.baud_rate        = self.declare_parameter('baud_rate', 115200).value
         self.wheel_separation = self.declare_parameter('wheel_separation', 0.35).value
         self.max_speed        = self.declare_parameter('max_speed', 1.0).value
-        self.max_pwm          = self.declare_parameter('max_pwm', 60).value
-        self.min_pwm          = self.declare_parameter('min_pwm', 45).value
+        self.max_pwm          = self.declare_parameter('max_pwm', 30).value
+        self.min_pwm          = self.declare_parameter('min_pwm', 20).value
         self.is_driving       = False
 
         # Serial write lock — traffic is now bidirectional and writes come from

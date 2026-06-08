@@ -20,12 +20,24 @@ def generate_launch_description():
 
     lidar_port   = LaunchConfiguration('lidar_port')
     arduino_port = LaunchConfiguration('arduino_port')
+    wheel_separation = LaunchConfiguration('wheel_separation')
+    max_speed        = LaunchConfiguration('max_speed')
+    max_pwm          = LaunchConfiguration('max_pwm')
+    min_pwm          = LaunchConfiguration('min_pwm')
 
     return LaunchDescription([
         DeclareLaunchArgument('lidar_port', default_value='/dev/rplidar',
                               description='Serial port for the RPLiDAR A1'),
         DeclareLaunchArgument('arduino_port', default_value='/dev/arduino',
                               description='Serial port for the Arduino Mega'),
+        DeclareLaunchArgument('wheel_separation', default_value='0.35',
+                              description='Wheel separation in meters (for differential drive mixing)'),
+        DeclareLaunchArgument('max_speed', default_value='1.0',
+                              description='Maximum linear speed (m/s) used for PWM scaling in arduino_bridge'),
+        DeclareLaunchArgument('max_pwm', default_value='30',
+                              description='Maximum PWM magnitude sent to motors (clamped in bridge)'),
+        DeclareLaunchArgument('min_pwm', default_value='20',
+                              description='Minimum PWM magnitude for non-zero motor commands (deadband)'),
 
         # Robot description / TF tree
         IncludeLaunchDescription(
@@ -52,6 +64,12 @@ def generate_launch_description():
             executable='arduino_bridge',
             name='arduino_bridge',
             output='screen',
-            parameters=[{'serial_port': arduino_port}],
+            parameters=[{
+                'serial_port': arduino_port,
+                'wheel_separation': wheel_separation,
+                'max_speed': max_speed,
+                'max_pwm': max_pwm,
+                'min_pwm': min_pwm,
+            }],
         ),
     ])

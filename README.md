@@ -110,14 +110,14 @@ left_pwm  = linear_x − angular_z × (wheel_separation / 2)
 right_pwm = linear_x + angular_z × (wheel_separation / 2)
 ```
 
-- `wheel_separation` = 0.35 m, `max_speed` = 1.0 m/s, `max_pwm` = 60, `min_pwm` = 45 (deadband clamp)
+- `wheel_separation` = 0.35 m, `max_speed` = 1.0 m/s, `max_pwm` = 30, `min_pwm` = 20 (deadband clamp)
 - Sent to Arduino as `<L,R>\n`
 
 **`/robot/body/command` accepted strings**
 
 | Format | Example | Action |
 |--------|---------|--------|
-| Direct PWM | `60,60` or `<-20,-20>` | Immediate motor command |
+| Direct PWM | `30,30` or `<-20,-20>` | Immediate motor command |
 | Drive shortcut | `FORWARD`, `BACKWARD`, `LEFT`, `RIGHT` | Timed drive (2–2.5 s) in background thread |
 | Stop | `STOP` | Sends `<0,0>` immediately |
 | Servo / animation | `NOD`, `SHAKE`, `EBLINK`, `CENTER`, `WAVE:L`, `WAVE:R` | Forwarded as `<CMD>` |
