@@ -15,7 +15,7 @@ from launch.launch_description_sources import (
     PythonLaunchDescriptionSource,
     AnyLaunchDescriptionSource,
 )
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 
 
@@ -83,5 +83,22 @@ def generate_launch_description():
             AnyLaunchDescriptionSource(
                 os.path.join(rosbridge_share, 'launch', 'rosbridge_websocket_launch.xml')),
             condition=IfCondition(use_web),
+        ),
+
+        # Runtime saved locations (user-named points from the web UI).
+        # Provides /save_location, /delete_location, and latched /saved_locations.
+        # Started when voice or web is enabled so:
+        #   - voice_node can resolve "go to abc" against user-saved points
+        #   - web UI can persist points and see the live list
+        Node(
+            package='omni_base',
+            executable='location_manager',
+            name='location_manager',
+            output='screen',
+            condition=IfCondition(
+                PythonExpression([
+                    '"', use_voice, '" == "true" or "', use_web, '" == "true"'
+                ])
+            ),
         ),
     ])

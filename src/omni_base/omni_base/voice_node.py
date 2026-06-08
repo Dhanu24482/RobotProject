@@ -18,6 +18,7 @@ import time
 import os
 import math
 import yaml
+import json
 
 # ════════════════════════════════════════════════════════════
 #  ROOM COORDINATES
@@ -200,6 +201,10 @@ class VoiceNode(Node):
         default_rooms = os.path.join(
             get_package_share_directory('omni_base'), 'config', 'rooms.yaml')
         self.rooms_file    = self.declare_parameter('rooms_file', default_rooms).value
+        self.saved_locations_file = self.declare_parameter(
+            'saved_locations_file',
+            os.path.join(os.path.expanduser('~'), '.ros', 'varys_saved_locations.yaml')
+        ).value
         self.drive_pwm     = self.declare_parameter('drive_pwm', 20).value
         voice_topic        = self.declare_parameter('voice_topic', '/robot/voice/command').value
         body_topic         = self.declare_parameter('body_topic',  '/robot/body/command').value
@@ -207,8 +212,23 @@ class VoiceNode(Node):
         hands_topic        = self.declare_parameter('hands_topic', '/robot/hands/pose').value
         goal_topic         = self.declare_parameter('goal_topic',  '/goal_pose').value
 
-        # Room coordinates: single source of truth is config/rooms.yaml.
-        self.rooms = load_rooms(self.rooms_file, self.get_logger())
+        # Room coordinates: start from canonical static rooms (config/rooms.yaml),
+        # then overlay any user-saved locations persisted by the web UI / location_manager.
+        self.static_rooms = load_rooms(self.rooms_file, self.get_logger())
+        self.rooms = dict(self.static_rooms)
+
+        # Best-effort load of runtime-saved locations so voice works even if
+        # location_manager is not running (or hasn't published yet).
+        user_locs = self._load_user_locations(self.saved_locations_file)
+        if user_locs:
+            self.rooms = {**self.rooms, **user_locs}
+            self.get_logger().info(
+                f'Loaded {len(user_locs)} user-saved location(s) from {self.saved_locations_file} '
+                f'(effective rooms: {len(self.rooms)})'
+            )
+
+        # Subscribe to latched updates so new saves/deletes from the web UI are picked up live.
+        self.create_subscription(String, '/saved_locations', self._on_saved_locations, 10)
 
         self.voice_pub   = self.create_publisher(String,            voice_topic, 10)
         self.body_pub    = self.create_publisher(String,            body_topic,  10)
@@ -393,6 +413,35 @@ class VoiceNode(Node):
     # Publish the intended hand poses [left_deg, right_deg].
     def publish_hands(self, left_deg, right_deg):
         msg = Float32MultiArray(); msg.data = [float(left_deg), float(right_deg)]; self.hands_pub.publish(msg)
+
+    # ── Runtime-saved locations helpers ───────────────────────────────────────
+    def _load_user_locations(self, path):
+        """Load user-saved locations from YAML. Returns {} if missing/unreadable."""
+        try:
+            if os.path.exists(path):
+                with open(path, 'r') as f:
+                    data = yaml.safe_load(f) or {}
+                locs = data.get('locations', {}) or {}
+                parsed = {str(name): tuple(float(v) for v in coords)
+                          for name, coords in locs.items()}
+                return parsed
+        except Exception as e:
+            self.get_logger().warn(f'Could not load user locations {path}: {e}')
+        return {}
+
+    def _on_saved_locations(self, msg: String):
+        """Handle latched /saved_locations updates from location_manager (or any publisher)."""
+        try:
+            payload = json.loads(msg.data)
+            locs = payload.get('locations', {}) or {}
+            user_locs = {str(name): tuple(float(v) for v in coords)
+                         for name, coords in locs.items()}
+            # Overlay user locations on top of static rooms so runtime saves win.
+            self.rooms = {**self.static_rooms, **user_locs}
+            self.get_logger().info(f'Updated rooms from /saved_locations: {len(self.rooms)} total')
+        except Exception as e:
+            self.get_logger().warn(f'Failed to parse /saved_locations: {e}')
+
 
 def main(args=None):
     rclpy.init(args=args)

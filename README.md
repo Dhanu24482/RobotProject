@@ -161,7 +161,7 @@ Microphone → Google STT → text
 
 | Category | Example phrases |
 |----------|----------------|
-| Navigation | "go to room 1", "navigate to reception", "take me to lobby", "go home" |
+| Navigation | "go to room 1", "navigate to reception", "take me to lobby", "go home", "go to abc" (user-saved via web UI) |
 | Movement | "go forward", "move back", "turn left", "turn right", "stop" |
 | Head / body | "look left", "look right", "look forward", "nod", "shake", "blink", "wink" |
 | Arms | "wave", "wave left", "wave right", "hands up", "hands down" |
@@ -264,6 +264,15 @@ A standalone browser dashboard that renders the live Nav2 global costmap in real
    ```
 
 4. Open `index.html` in any browser on the same network.
+
+**Saved Locations (runtime user-named points):**
+- Click anywhere on the live map → a goal is sent immediately (existing behavior).
+- Enter a short name (e.g. `abc`) in the "Saved Locations" panel and click **Save last click**.
+- The point is persisted by `location_manager` (to `~/.ros/varys_saved_locations.yaml`) and published on the latched `/saved_locations` topic.
+- Both the web UI and the voice node pick up the update. Say **"go to abc"** and Varys will navigate there.
+- Each saved entry has a small **×** to delete it. Deletes are also persisted and broadcast.
+
+The "Go To Room" buttons remain the static set from `config/rooms.yaml`. Runtime saves live in a separate list so they don't pollute the canonical rooms.
 
 ---
 
@@ -531,3 +540,4 @@ ros2 topic list                              # all active topics
 - **Two map files** exist: `omniserv_map.*` at workspace root and `src/omni_base/maps/my_room_map.*` (the one Nav2 loads via `navigation.launch.py`). The root copy is a duplicate and can be removed once confirmed unused.
 - **EKF (`config/ekf.yaml`)** is provided but not launched. Enable it once wheel encoder odometry is wired into the Arduino and publishing on `/wheel/odom`.
 - **Room 4, reception, and lobby** coordinates in `config/rooms.yaml` are rough estimates — measure and update them from the saved map once the environment is finalized. Keep the web UI `ROOMS` list (`web_interface/index.html`) in sync with `config/rooms.yaml`.
+- **Runtime saved locations:** When `use_voice:=true` or `use_web:=true`, `navigation.launch.py` also starts `location_manager`. It merges static rooms with user-saved points from `~/.ros/varys_saved_locations.yaml`, publishes a latched `/saved_locations` (JSON), and accepts `/save_location` (JSON or `name|x|y|yaw`) and `/delete_location` (plain name). The web UI and `voice_node` consume this so "go to <name>" resolves both static rooms and user-saved points (user-saved shadow on name collision). The YAML is the durable store; the topic provides live sync.

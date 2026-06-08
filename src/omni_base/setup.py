@@ -32,8 +32,9 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'arduino_bridge = omni_base.arduino_bridge:main',
-            'voice_node     = omni_base.voice_node:main',
+            'arduino_bridge  = omni_base.arduino_bridge:main',
+            'voice_node      = omni_base.voice_node:main',
+            'location_manager = omni_base.location_manager:main',
         ],
     },
 )

@@ -66,6 +66,7 @@
       <h2>Live Map &amp; Navigation</h2>
       <div id="map_canvas"></div>
       <div class="hint">Click anywhere on the map to send a navigation goal. Robot pose and the planned path are drawn live.</div>
+      <div id="last_click_hint" class="hint" style="margin-top:4px; color:#7f8c99;">Last click: (none) — click the map to pick a point, then name &amp; save it below.</div>
     </div>
 
     <!-- ── Controls column ── -->
@@ -73,6 +74,17 @@
       <div class="panel row">
         <h2>Go To Room</h2>
         <div class="rooms" id="rooms"></div>
+      </div>
+
+      <!-- Runtime-saved locations (synced with location_manager + voice_node) -->
+      <div class="panel row">
+        <h2>Saved Locations</h2>
+        <div style="display:flex; gap:6px; margin-bottom:6px; align-items:center;">
+          <input id="save_name" placeholder="name (e.g. abc)" style="background:#0f1419; border:1px solid #2c3744; color:#e6edf3; border-radius:6px; padding:6px 8px; font-size:13px; width:140px;" />
+          <button class="btn" id="save_last_btn">Save last click</button>
+        </div>
+        <div class="rooms" id="saved_locations"></div>
+        <div class="hint" style="margin-top:4px;">These persist (via location_manager) and are available to voice: “go to abc”.</div>
       </div>
 
       <div class="panel row">
@@ -129,6 +141,12 @@
   let goalPub = null, bodyPub = null;
   let robotMarker = null, pathShape = null;
 
+  // Runtime saved locations (from location_manager via /saved_locations)
+  let lastClick = null;            // {x, y, yaw} from last map click (for "Save last click")
+  let saveLocPub = null;
+  let deleteLocPub = null;
+  let savedLocations = {};         // name -> [x, y, yaw] (merged static + user-saved)
+
   // ── Connection ──
   function getIp() {
     const q = new URLSearchParams(location.search).get('ip');
@@ -158,11 +176,16 @@
     goalPub = new ROSLIB.Topic({ ros, name: '/goal_pose', messageType: 'geometry_msgs/PoseStamped' });
     bodyPub = new ROSLIB.Topic({ ros, name: '/robot/body/command', messageType: 'std_msgs/String' });
 
+    // For persisting user-named points at runtime (synced to voice_node via location_manager)
+    saveLocPub   = new ROSLIB.Topic({ ros, name: '/save_location',   messageType: 'std_msgs/String' });
+    deleteLocPub = new ROSLIB.Topic({ ros, name: '/delete_location', messageType: 'std_msgs/String' });
+
     buildMap();
     subscribeRobotPose();
     subscribePath();
     subscribeSensors();
     subscribeTranscript();
+    subscribeSavedLocations();
   }
 
   // ── Map + costmap ──
@@ -237,7 +260,9 @@
       // Inverse of the EaselJS scene transform (global = local*scale + translate).
       const rosX = (gx - viewer.scene.x) / viewer.scene.scaleX;
       const rosY = (gy - viewer.scene.y) / viewer.scene.scaleY;
+      lastClick = { x: rosX, y: rosY, yaw: 0.0 };
       publishGoal(rosX, rosY, 0.0);
+      updateLastClickHint(rosX, rosY);
     });
   }
 
@@ -255,6 +280,12 @@
   }
   function sendBody(cmd) {
     if (bodyPub) bodyPub.publish(new ROSLIB.Message({ data: cmd }));
+  }
+
+  // Small hint so the user knows what will be saved when they hit "Save last click".
+  function updateLastClickHint(x, y) {
+    const el = document.getElementById('last_click_hint');
+    if (el) el.textContent = `Last click: (${x.toFixed(3)}, ${y.toFixed(3)}) — yaw 0. Click “Save last click” to name it.`;
   }
 
   // ── Sensors ──
@@ -297,6 +328,80 @@
       });
   }
 
+  // ── Live sync of saved locations (latched topic from location_manager) ──
+  function subscribeSavedLocations() {
+    new ROSLIB.Topic({ ros, name: '/saved_locations', messageType: 'std_msgs/String' })
+      .subscribe((msg) => {
+        try {
+          const payload = JSON.parse(msg.data || '{}');
+          savedLocations = payload.locations || {};
+          buildSavedLocationButtons();
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.warn('Bad /saved_locations payload', e);
+        }
+      });
+  }
+
+  function buildSavedLocationButtons() {
+    const box = document.getElementById('saved_locations');
+    if (!box) return;
+    box.innerHTML = '';
+    Object.keys(savedLocations).forEach((name) => {
+      const wrap = document.createElement('span');
+      wrap.style.display = 'inline-flex';
+      wrap.style.alignItems = 'center';
+      wrap.style.gap = '2px';
+
+      const b = document.createElement('button');
+      b.className = 'btn';
+      b.textContent = name;
+      b.onclick = () => {
+        const arr = savedLocations[name];
+        if (!arr) return;
+        const [x, y, yaw] = arr;
+        publishGoal(x, y, (yaw || 0));
+      };
+
+      const del = document.createElement('button');
+      del.className = 'btn';
+      del.textContent = '×';
+      del.title = 'Delete saved location';
+      del.onclick = (ev) => {
+        ev.stopPropagation();
+        deleteSavedLocation(name);
+      };
+
+      wrap.appendChild(b);
+      wrap.appendChild(del);
+      box.appendChild(wrap);
+    });
+  }
+
+  function saveLastClick() {
+    if (!saveLocPub) { alert('Connect first.'); return; }
+    if (!lastClick) { alert('Click on the map first to choose a point.'); return; }
+    const nameEl = document.getElementById('save_name');
+    const name = (nameEl && nameEl.value || '').trim();
+    if (!name) { alert('Enter a name for the location (e.g. abc).'); return; }
+
+    // JSON format understood by location_manager
+    const payload = JSON.stringify({
+      name: name,
+      x: lastClick.x,
+      y: lastClick.y,
+      yaw: lastClick.yaw || 0
+    });
+    saveLocPub.publish(new ROSLIB.Message({ data: payload }));
+    if (nameEl) nameEl.value = '';
+  }
+
+  function deleteSavedLocation(name) {
+    if (!deleteLocPub) return;
+    deleteLocPub.publish(new ROSLIB.Message({ data: name }));
+    // Rebuild happens automatically when the latched /saved_locations update arrives.
+  }
+
   // ── UI wiring ──
   function buildRoomButtons() {
     const box = document.getElementById('rooms');
@@ -310,6 +415,10 @@
 
   document.addEventListener('DOMContentLoaded', () => {
     buildRoomButtons();
+    // Saved locations controls (panel is always in DOM; buttons are populated live)
+    const saveBtn = document.getElementById('save_last_btn');
+    if (saveBtn) saveBtn.onclick = saveLastClick;
+
     document.getElementById('connect_btn').onclick = connect;
     document.querySelectorAll('[data-cmd]').forEach((b) => {
       b.onclick = () => sendBody(b.getAttribute('data-cmd'));
