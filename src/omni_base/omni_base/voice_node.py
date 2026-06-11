@@ -20,6 +20,7 @@ import os
 import math
 import yaml
 import json
+import re
 from ctypes import CFUNCTYPE, c_char_p, c_int, cdll
 
 _alsa_handler = None  # module-level ref prevents garbage collection
@@ -220,6 +221,8 @@ class VoiceNode(Node):
             os.path.join(os.path.expanduser('~'), '.ros', 'varys_saved_locations.yaml')
         ).value
         self.drive_pwm     = self.declare_parameter('drive_pwm', 20).value
+        # ── Robot name (wake-word trigger) — change here to rename the robot ──
+        self.robot_name    = self.declare_parameter('robot_name', 'varys').value.lower().strip()
         voice_topic        = self.declare_parameter('voice_topic', '/robot/voice/command').value
         body_topic         = self.declare_parameter('body_topic',  '/robot/body/command').value
         head_topic         = self.declare_parameter('head_topic',  '/robot/head/pose').value
@@ -288,7 +291,7 @@ class VoiceNode(Node):
         except Exception as e: self.get_logger().error(f'Microphone error: {e}')
 
         time.sleep(1)
-        self.speak_async('Varys online. Navigation and AI systems ready.')
+        self.speak_async(f'{self.robot_name.capitalize()} online. Navigation and AI systems ready.')
         threading.Thread(target=self.listen_loop, daemon=True).start()
 
     def speak(self, text):
@@ -317,12 +320,39 @@ class VoiceNode(Node):
                 self.get_logger().warn(f'Listen loop error: {e}')
                 time.sleep(1)
 
+    def _strip_wake_word(self, text):
+        """Return the command after the robot name, or None if not addressed to the robot.
+
+        Requires the name to appear at the start of the utterance and at a word
+        boundary so that a name like "varys" does not trigger on "varysian".
+        Any leading punctuation or whitespace (e.g. the comma in "varys, go to
+        office") is stripped from the remainder.
+
+        Returns:
+            None   — the utterance does not start with the robot's name; ignore it.
+            ''     — only the bare name was spoken; caller should acknowledge.
+            str    — the command text with the name prefix removed.
+        """
+        pattern = r'^' + re.escape(self.robot_name) + r'\b'
+        m = re.match(pattern, text)
+        if not m:
+            return None
+        remainder = text[m.end():].lstrip(' ,;:!?')
+        return remainder
+
     def route(self, text):
+        command = self._strip_wake_word(text)
+        if command is None:
+            self.get_logger().debug(f'Ignored (no wake word): "{text}"')
+            return
+        if not command:
+            self.speak_async('Yes?')
+            return
         for cmd in self.robot_commands:
-            if cmd in text:
-                self.handle_robot_command(text)
+            if cmd in command:
+                self.handle_robot_command(command)
                 return
-        self.handle_ai_question(text)
+        self.handle_ai_question(command)
 
     def handle_robot_command(self, text):
         # ── NAV2 ROOM NAVIGATION ──

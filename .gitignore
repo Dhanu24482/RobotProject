@@ -49,3 +49,6 @@ Thumbs.db
 *.log
 *.bag
 *.db3
+
+# python version
+.python-version

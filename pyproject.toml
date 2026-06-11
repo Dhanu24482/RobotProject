@@ -1,0 +1,12 @@
+[project]
+name = "robotproject"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "google-genai>=2.8.0",
+    "gtts>=2.5.4",
+    "pyserial>=3.5",
+    "speechrecognition>=3.16.1",
+]
