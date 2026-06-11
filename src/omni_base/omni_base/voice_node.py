@@ -10,6 +10,7 @@ from std_msgs.msg import String
 from std_msgs.msg import Float32MultiArray
 from geometry_msgs.msg import Twist
 from geometry_msgs.msg import PoseStamped
+from action_msgs.msg import GoalStatusArray
 import speech_recognition as sr
 import subprocess
 import threading
@@ -19,6 +20,19 @@ import os
 import math
 import yaml
 import json
+from ctypes import CFUNCTYPE, c_char_p, c_int, cdll
+
+_alsa_handler = None  # module-level ref prevents garbage collection
+
+def _silence_alsa_errors():
+    """Install a no-op ALSA error handler so libasound stops spamming stderr."""
+    try:
+        global _alsa_handler
+        ERROR_HANDLER = CFUNCTYPE(None, c_char_p, c_int, c_char_p, c_int, c_char_p)
+        _alsa_handler = ERROR_HANDLER(lambda *a: None)
+        cdll.LoadLibrary('libasound.so.2').snd_lib_error_set_handler(_alsa_handler)
+    except Exception:
+        pass  # best-effort; never block startup on logging cleanup
 
 # ════════════════════════════════════════════════════════════
 #  ROOM COORDINATES
@@ -230,6 +244,12 @@ class VoiceNode(Node):
         # Subscribe to latched updates so new saves/deletes from the web UI are picked up live.
         self.create_subscription(String, '/saved_locations', self._on_saved_locations, 10)
 
+        # Track navigation outcomes (SUCCEEDED / ABORTED / CANCELED).
+        self._active_goal = None
+        self._last_nav_status = None
+        self.create_subscription(GoalStatusArray, '/navigate_to_pose/_action/status',
+                                 self._on_nav_status, 10)
+
         self.voice_pub   = self.create_publisher(String,            voice_topic, 10)
         self.body_pub    = self.create_publisher(String,            body_topic,  10)
         self.head_pub    = self.create_publisher(Float32MultiArray, head_topic,  10)
@@ -248,6 +268,8 @@ class VoiceNode(Node):
         self.listening   = True
         self.is_speaking = False
 
+        # Suppress libasound's verbose PCM-enumeration stderr before opening mic.
+        _silence_alsa_errors()
         # Open the microphone once and reuse it (re-opening every loop iteration
         # is slow and can leak audio device handles).
         self.microphone = sr.Microphone()
@@ -383,6 +405,10 @@ class VoiceNode(Node):
         self.get_logger().info(f'Navigating to {matched} ({x}, {y})')
         self.speak_async(f'Navigating to {matched}.')
 
+        # Remember destination so _on_nav_status can name it in the outcome message.
+        self._active_goal = matched
+        self._last_nav_status = None  # reset so next status transition fires
+
         # Publish exactly what Nav2 needs to move the robot
         goal = PoseStamped()
         goal.header.frame_id    = 'map'
@@ -441,6 +467,28 @@ class VoiceNode(Node):
             self.get_logger().info(f'Updated rooms from /saved_locations: {len(self.rooms)} total')
         except Exception as e:
             self.get_logger().warn(f'Failed to parse /saved_locations: {e}')
+
+    def _on_nav_status(self, msg: GoalStatusArray):
+        """Log and speak navigation outcomes (SUCCEEDED / ABORTED / CANCELED)."""
+        if not msg.status_list:
+            return
+        status = msg.status_list[-1].status  # status of the most-recent goal
+        if status == self._last_nav_status:
+            return  # only act on transitions, not repeated identical states
+        self._last_nav_status = status
+        target = self._active_goal or 'the target'
+        if status == 4:    # SUCCEEDED
+            self.get_logger().info(f'Arrived at {target}.')
+            self.speak_async(f'I have arrived at {target}.')
+            self._active_goal = None
+        elif status == 6:  # ABORTED — planner/controller gave up
+            self.get_logger().error(
+                f'Could not reach {target}: path blocked or pose unreachable.')
+            self.speak_async(f'I could not reach {target}. The path may be blocked.')
+            self._active_goal = None
+        elif status == 5:  # CANCELED
+            self.get_logger().warn(f'Navigation to {target} was canceled.')
+            self._active_goal = None
 
 
 def main(args=None):

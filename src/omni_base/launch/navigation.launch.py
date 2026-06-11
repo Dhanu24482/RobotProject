@@ -87,18 +87,15 @@ def generate_launch_description():
 
         # Runtime saved locations (user-named points from the web UI).
         # Provides /save_location, /delete_location, and latched /saved_locations.
-        # Started when voice or web is enabled so:
+        # Started in navigation mode so:
         #   - voice_node can resolve "go to abc" against user-saved points
         #   - web UI can persist points and see the live list
+        # We start it unconditionally (lightweight) to avoid fragile PythonExpression
+        # conditions with launch arg substitution. It is harmless if unused.
         Node(
             package='omni_base',
             executable='location_manager',
             name='location_manager',
             output='screen',
-            condition=IfCondition(
-                PythonExpression([
-                    '"', use_voice, '" == "true" or "', use_web, '" == "true"'
-                ])
-            ),
         ),
     ])

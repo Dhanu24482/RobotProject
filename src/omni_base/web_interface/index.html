@@ -1,432 +1,678 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>OmniServ / Varys — Live Dashboard</title>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>OmniServ Robot Control</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/eventemitter2/6.4.9/eventemitter2.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/roslib@1/build/roslib.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
 
-  <script src="https://static.robotwebtools.org/EventEmitter2/current/eventemitter2.min.js"></script>
-  <script src="https://static.robotwebtools.org/roslibjs/current/roslib.min.js"></script>
-  <script src="https://static.robotwebtools.org/EaselJS/current/easeljs.min.js"></script>
-  <script src="https://static.robotwebtools.org/ros2djs/current/ros2d.min.js"></script>
+:root {
+  --bg: #0f172a; 
+  --panel: rgba(30, 41, 59, 0.8); 
+  --border: rgba(51, 65, 85, 0.8);
+  --accent: #38bdf8; 
+  --accent-hover: #0284c7;
+  --accent2: #f97316; 
+  --green: #10b981;
+  --red: #ef4444; 
+  --yellow: #f59e0b; 
+  --text: #f8fafc; 
+  --dim: #94a3b8;
+  --glow: 0 4px 14px rgba(56, 189, 248, 0.3); 
+  --radius: 12px;
+}
 
-  <style>
-    :root { --bg:#0f1419; --panel:#1b232c; --line:#2c3744; --accent:#3da5ff; --ok:#36c275; --warn:#e0b341; --bad:#e0533d; --text:#e6edf3; --muted:#7f8c99; }
-    * { box-sizing: border-box; }
-    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-           background:#0f1419; color:#e6edf3; }
-    header { display:flex; align-items:center; gap:12px; padding:10px 16px;
-             background:#1b232c; border-bottom:1px solid #2c3744; flex-wrap:wrap; }
-    header h1 { font-size:18px; margin:0; font-weight:600; }
-    .conn { display:flex; align-items:center; gap:6px; font-size:13px; }
-    .dot { width:10px; height:10px; border-radius:50%; background:#e0533d; }
-    .dot.ok { background:#36c275; } .dot.warn { background:#e0b341; }
-    header input { background:#0f1419; border:1px solid #2c3744; color:#e6edf3;
-                   border-radius:6px; padding:6px 8px; font-size:13px; width:150px; }
-    header button, .btn { background:#243140; border:1px solid #2c3744; color:#e6edf3;
-            border-radius:6px; padding:6px 10px; font-size:13px; cursor:pointer; }
-    header button:hover, .btn:hover { background:#2d3d4f; }
-    .layout { display:grid; grid-template-columns: 2fr 1fr; gap:14px; padding:14px; }
-    @media (max-width: 900px){ .layout { grid-template-columns: 1fr; } }
-    .panel { background:#1b232c; border:1px solid #2c3744; border-radius:10px; padding:12px; }
-    .panel h2 { margin:0 0 10px; font-size:14px; color:#9fb0c0; font-weight:600;
-                text-transform:uppercase; letter-spacing:.04em; }
-    #map_canvas { width:100%; border:1px solid #2c3744; border-radius:8px; background:#0a0e12;
-                  display:block; cursor:crosshair; }
-    .rooms, .drive, .anim { display:flex; flex-wrap:wrap; gap:8px; }
-    .grid4 { display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; }
-    .sensor { background:#0f1419; border:1px solid #2c3744; border-radius:6px;
-              padding:8px; text-align:center; font-size:13px; }
-    .sensor .v { font-size:18px; font-weight:700; }
-    .sensor.near { border-color:#e0b341; } .sensor.hit { border-color:#e0533d; }
-    .pit { margin-top:10px; padding:8px; border-radius:6px; text-align:center; font-weight:700;
-           background:#16241a; border:1px solid #2c3744; }
-    .pit.alert { background:#3a1714; border-color:#e0533d; color:#ff9b88; }
-    #transcript { height:120px; overflow:auto; background:#0f1419; border:1px solid #2c3744;
-                  border-radius:6px; padding:8px; font-size:13px; line-height:1.5; }
-    #transcript div { padding:2px 0; border-bottom:1px solid #1c252e; }
-    .hint { color:#7f8c99; font-size:12px; margin-top:6px; }
-    .row { margin-bottom:14px; }
-  </style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; overflow: hidden; }
+
+body {
+  background: var(--bg);
+  background-image: radial-gradient(circle at 50% 0%, #1e293b 0%, transparent 70%);
+  color: var(--text);
+  font-family: 'Inter', sans-serif;
+  display: grid;
+  grid-template-rows: 60px 1fr 45px;
+  grid-template-columns: 290px 1fr 240px;
+  grid-template-areas: "hd hd hd" "sb mp ip" "ft ft ft";
+  height: 100vh;
+}
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+/* ── HEADER ── */
+header {
+  grid-area: hd; background: var(--panel); backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border); display: flex; align-items: center; 
+  padding: 0 20px; gap: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.2); z-index: 10;
+}
+.logo { font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 700; color: var(--text); letter-spacing: 1px; }
+.logo span { color: var(--accent); }
+.hsep { flex: 1; }
+
+.pill {
+  display: flex; align-items: center; gap: 8px; background: rgba(15, 23, 42, 0.6); 
+  border: 1px solid var(--border); border-radius: 20px; padding: 6px 14px; font-size: 12px; font-weight: 500;
+}
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); box-shadow: 0 0 8px var(--red); transition: all 0.3s ease; }
+.dot.on { background: var(--green); box-shadow: 0 0 8px var(--green); }
+
+.ros-input {
+  background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border); color: var(--text); 
+  font-family: 'JetBrains Mono', monospace; font-size: 13px; padding: 8px 12px; 
+  border-radius: 8px; width: 220px; outline: none; transition: all 0.2s;
+}
+.ros-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(56,189,248,0.2); }
+
+.btn {
+  background: var(--panel); border: 1px solid var(--border); color: var(--text);
+  font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 600;
+  padding: 8px 16px; border-radius: 8px; cursor: pointer; transition: all 0.2s ease;
+}
+.btn:hover { background: var(--border); color: #fff; transform: translateY(-1px); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #0f172a; }
+.btn.primary:hover { background: var(--accent-hover); box-shadow: var(--glow); color: #fff; }
+.btn.red { border-color: rgba(239, 68, 68, 0.5); color: var(--red); }
+.btn.red:hover { background: var(--red); color: #fff; border-color: var(--red); }
+.btn.green { background: rgba(16, 185, 129, 0.1); border-color: var(--green); color: var(--green); }
+.btn.green:hover { background: var(--green); color: #fff; }
+
+/* ── SIDEBARS ── */
+aside, .ipanel {
+  background: var(--panel); backdrop-filter: blur(10px); display: flex; flex-direction: column; 
+  overflow-y: auto; gap: 12px; padding: 16px;
+}
+aside { grid-area: sb; border-right: 1px solid var(--border); }
+.ipanel { grid-area: ip; border-left: 1px solid var(--border); }
+
+.slabel { font-size: 11px; font-weight: 600; letter-spacing: 1px; color: var(--dim); text-transform: uppercase; margin-bottom: -4px; }
+.sblock { background: rgba(15, 23, 42, 0.4); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; }
+
+select.ros-input { appearance: none; cursor: pointer; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2394a3b8'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; background-size: 16px; padding-right: 36px; }
+
+/* Control Modes */
+.mode-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.mbtn {
+  padding: 10px 4px; border: 1px solid var(--border); background: rgba(15, 23, 42, 0.6);
+  color: var(--dim); font-size: 11px; font-weight: 500; border-radius: 8px;
+  cursor: pointer; transition: all 0.2s; text-align: center;
+}
+.mbtn:hover { border-color: var(--accent); color: var(--text); }
+.mbtn.act { border-color: var(--accent); color: var(--accent); background: rgba(56, 189, 248, 0.1); box-shadow: var(--glow); }
+.mbtn.add { border-color: var(--green); color: var(--green); }
+.mbtn.add:hover { background: rgba(16, 185, 129, 0.1); }
+
+/* D-pad */
+.dpad { display: grid; grid-template-columns: repeat(3, 50px); grid-template-rows: repeat(3, 50px); gap: 6px; justify-content: center; margin-bottom: 12px; }
+.dp { background: rgba(30, 41, 59, 0.8); border: 1px solid var(--border); color: var(--text); font-size: 18px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.1s; user-select: none; }
+.dp:hover, .dp:active { background: var(--accent); border-color: var(--accent); color: #0f172a; transform: scale(0.95); }
+.dp.stop:hover, .dp.stop:active { background: var(--red); border-color: var(--red); color: #fff; }
+
+.srow { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.srow label { font-size: 11px; font-weight: 500; color: var(--dim); display: flex; justify-content: space-between; }
+.srow label span { color: var(--accent); font-family: 'JetBrains Mono', monospace; }
+input[type=range] { width: 100%; accent-color: var(--accent); height: 4px; border-radius: 2px; cursor: pointer; }
+
+/* Quick Actions */
+.act-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.act-btn { padding: 10px 4px; border: 1px solid var(--border); background: rgba(15, 23, 42, 0.6); color: var(--text); font-size: 10px; font-weight: 500; border-radius: 8px; cursor: pointer; transition: all 0.2s; text-align: center; }
+.act-btn:hover { border-color: var(--accent2); color: var(--accent2); background: rgba(249, 115, 22, 0.1); transform: translateY(-2px); }
+
+/* Info Panel Stats */
+.stat-row { display: flex; justify-content: space-between; font-size: 12px; padding: 4px 0; font-family: 'JetBrains Mono', monospace; color: var(--dim); border-bottom: 1px solid rgba(51, 65, 85, 0.4); }
+.stat-row:last-child { border-bottom: none; }
+.stat-row .v { color: var(--text); font-weight: bold; }
+.stat-row .v.ok { color: var(--green); } .stat-row .v.warn { color: var(--yellow); } .stat-row .v.err { color: var(--red); }
+
+.log-box { flex: 1; overflow-y: auto; background: rgba(15, 23, 42, 0.8); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; font-family: 'JetBrains Mono', monospace; font-size: 10px; }
+.le { padding: 2px 0; color: var(--dim); border-bottom: 1px solid rgba(51, 65, 85, 0.3); }
+.le.i { color: var(--accent); } .le.o { color: var(--green); } .le.w { color: var(--yellow); } .le.e { color: var(--red); }
+
+/* ── MAP AREA ── */
+main { grid-area: mp; position: relative; overflow: hidden; background: #020617; }
+canvas#mapCanvas { position: absolute; top: 0; left: 0; cursor: crosshair; }
+.map-hud { position: absolute; top: 16px; left: 16px; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+.hbadge { background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(4px); border: 1px solid var(--border); border-radius: 6px; padding: 6px 12px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--dim); }
+.hbadge span { color: var(--text); font-weight: bold; }
+.zctrl { position: absolute; top: 16px; right: 16px; display: flex; flex-direction: column; gap: 6px; }
+.zctrl .btn { padding: 8px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+
+.map-hint {
+  position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+  background: rgba(15, 23, 42, 0.9); border: 1px solid var(--border); border-radius: 20px;
+  padding: 8px 24px; font-size: 12px; font-weight: 500; color: var(--text); pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+/* ── FOOTER ── */
+footer { grid-area: ft; background: var(--panel); border-top: 1px solid var(--border); display: flex; align-items: center; padding: 0 20px; gap: 16px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--dim); }
+.fs { display: flex; gap: 8px; align-items: center; } .fs .v { color: var(--accent); font-weight: bold; }
+.fsep { width: 1px; height: 20px; background: var(--border); }
+.fright { margin-left: auto; display: flex; gap: 10px; }
+
+.toast { position: fixed; top: 80px; right: 24px; background: var(--panel); border: 1px solid var(--accent); border-radius: 8px; padding: 14px 20px; font-weight: 500; font-size: 13px; color: var(--text); box-shadow: var(--glow); z-index: 999; transform: translateX(150%); transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+.toast.show { transform: translateX(0); }
+</style>
 </head>
 <body>
-  <header>
-    <h1>OmniServ · Varys</h1>
-    <div class="conn"><span id="status_dot" class="dot"></span><span id="status_text">disconnected</span></div>
-    <span style="flex:1"></span>
-    <label style="font-size:13px;">Pi IP
-      <input id="ip_input" placeholder="192.168.1.x" />
-    </label>
-    <button id="connect_btn">Connect</button>
-  </header>
 
-  <div class="layout">
-    <!-- ── Map column ── -->
-    <div class="panel">
-      <h2>Live Map &amp; Navigation</h2>
-      <div id="map_canvas"></div>
-      <div class="hint">Click anywhere on the map to send a navigation goal. Robot pose and the planned path are drawn live.</div>
-      <div id="last_click_hint" class="hint" style="margin-top:4px; color:#7f8c99;">Last click: (none) — click the map to pick a point, then name &amp; save it below.</div>
-    </div>
+<header>
+  <div class="logo">OMNI<span>SERV</span></div>
+  <div class="hsep"></div>
+  <input class="ros-input" id="ros-ip" type="text" value="ws://192.168.43.221:9090" placeholder="ws://PI_IP:9090"/>
+  <button class="btn primary" id="btn-conn" onclick="connectROS()">Connect</button>
+  <button class="btn red" id="btn-disc" onclick="disconnectROS()" style="display:none">Disconnect</button>
+  <div class="pill"><div class="dot" id="ros-dot"></div><span id="conn-label">Offline</span></div>
+</header>
 
-    <!-- ── Controls column ── -->
-    <div>
-      <div class="panel row">
-        <h2>Go To Room</h2>
-        <div class="rooms" id="rooms"></div>
-      </div>
+<aside>
 
-      <!-- Runtime-saved locations (synced with location_manager + voice_node) -->
-      <div class="panel row">
-        <h2>Saved Locations</h2>
-        <div style="display:flex; gap:6px; margin-bottom:6px; align-items:center;">
-          <input id="save_name" placeholder="name (e.g. abc)" style="background:#0f1419; border:1px solid #2c3744; color:#e6edf3; border-radius:6px; padding:6px 8px; font-size:13px; width:140px;" />
-          <button class="btn" id="save_last_btn">Save last click</button>
-        </div>
-        <div class="rooms" id="saved_locations"></div>
-        <div class="hint" style="margin-top:4px;">These persist (via location_manager) and are available to voice: “go to abc”.</div>
-      </div>
+  <div class="slabel">Quick Navigation</div>
+  <div class="sblock" style="border-color: var(--accent);">
+    <select id="room-select" class="ros-input" style="width:100%; margin-bottom: 12px; background: rgba(0,0,0,0.3);">
+      <option value="" disabled selected>Select Destination...</option>
+      <option value="reception">Reception Desk</option>
+      <option value="room 1">Room 1</option>
+      <option value="room 2">Room 2</option>
+      <option value="room 3">Room 3</option>
+      <option value="room 4">Room 4</option>
+      <option value="lobby">Main Lobby</option>
+      <option value="home">Charging Base</option>
+    </select>
+    <button class="btn primary" style="width:100%" onclick="goSelectedRoom()">🚀 Send Robot</button>
+  </div>
 
-      <div class="panel row">
-        <h2>Sensors</h2>
-        <div class="grid4" id="us_grid"></div>
-        <div class="pit" id="pit_box">Pit sensors: clear</div>
-      </div>
-
-      <div class="panel row">
-        <h2>Manual Control</h2>
-        <div class="grid4">
-          <span></span>
-          <button class="btn" data-cmd="&lt;20,20&gt;">▲ Fwd</button>
-          <span></span>
-          <button class="btn" data-cmd="&lt;-20,20&gt;">◀ Left</button>
-          <button class="btn" data-cmd="&lt;0,0&gt;">■ Stop</button>
-          <button class="btn" data-cmd="&lt;20,-20&gt;">Right ▶</button>
-          <span></span>
-          <button class="btn" data-cmd="&lt;-20,-20&gt;">▼ Back</button>
-          <span></span>
-        </div>
-        <div class="anim" style="margin-top:8px;">
-          <button class="btn" data-cmd="&lt;NOD&gt;">Nod</button>
-          <button class="btn" data-cmd="&lt;SHAKE&gt;">Shake</button>
-          <button class="btn" data-cmd="&lt;WAVE:R&gt;">Wave</button>
-          <button class="btn" data-cmd="&lt;EBLINK&gt;">Blink</button>
-          <button class="btn" data-cmd="&lt;CENTER&gt;">Center</button>
-        </div>
-      </div>
-
-      <div class="panel">
-        <h2>Heard (voice)</h2>
-        <div id="transcript"></div>
-      </div>
+  <div class="slabel">Interaction Mode</div>
+  <div class="sblock">
+    <div class="mode-grid">
+      <div class="mbtn act" id="mode-goal" onclick="setMode('goal')">🎯 Send Goal</div>
+      <div class="mbtn add" id="mode-add"  onclick="setMode('add')">➕ Save Loc</div>
+      <div class="mbtn" id="mode-teleop"   onclick="setMode('teleop')">🕹 Teleop</div>
+      <div class="mbtn" id="mode-pose"     onclick="setMode('pose')">📌 Init Pose</div>
     </div>
   </div>
 
-  <script>
-  // ── Room coordinates ──
-  // Canonical source of truth: config/rooms.yaml (loaded by voice_node.py).
-  // Keep these names/coordinates in sync with that file when rooms change.
-  const ROOMS = {
-    'Room 1':    [ 0.703, -0.069, 1.75],
-    'Room 2':    [-0.127, -0.235, 3.09],
-    'Room 3':    [-0.198, -1.068, 1.83],
-    'Room 4':    [-2.0,    1.5,   0.0 ],
-    'Reception': [-1.0,    0.5,   1.57],
-    'Lobby':     [ 0.5,   -2.0,   3.14],
-    'Home':      [ 0.0,    0.0,   0.0 ],
-  };
-  const US_SENSORS = ['front_left','front_center','front_right','rear_left','rear_center','rear_right'];
+  <div class="slabel" id="label-teleop">Manual Drive</div>
+  <div class="sblock" id="block-teleop">
+    <div class="dpad">
+      <div></div>
+      <div class="dp" onmousedown="startMove(0.2,0)" onmouseup="stopMove()">▲</div>
+      <div></div>
+      <div class="dp" onmousedown="startMove(0,0.5)" onmouseup="stopMove()">◀</div>
+      <div class="dp stop" onmousedown="stopMove()">■</div>
+      <div class="dp" onmousedown="startMove(0,-0.5)" onmouseup="stopMove()">▶</div>
+      <div></div>
+      <div class="dp" onmousedown="startMove(-0.2,0)" onmouseup="stopMove()">▼</div>
+      <div></div>
+    </div>
+    <div class="srow">
+      <label>Linear Speed <span id="lin-v">0.20</span></label>
+      <input type="range" id="lin-spd" min="0.05" max="0.5" step="0.05" value="0.2" oninput="document.getElementById('lin-v').textContent=parseFloat(this.value).toFixed(2)">
+    </div>
+    <div class="srow">
+      <label>Angular Speed <span id="ang-v">0.50</span></label>
+      <input type="range" id="ang-spd" min="0.1" max="1.5" step="0.1" value="0.5" oninput="document.getElementById('ang-v').textContent=parseFloat(this.value).toFixed(2)">
+    </div>
+  </div>
 
-  let ros = null, viewer = null, gridClient = null, tfClient = null;
-  let goalPub = null, bodyPub = null;
-  let robotMarker = null, pathShape = null;
+  <div class="slabel">Animations & Body</div>
+  <div class="sblock">
+    <div class="act-grid">
+      <div class="act-btn" onclick="bodyCmd('NOD')">👍 Nod</div>
+      <div class="act-btn" onclick="bodyCmd('SHAKE')">❌ Shake</div>
+      <div class="act-btn" onclick="bodyCmd('EBLINK')">👁 Blink</div>
+      <div class="act-btn" onclick="bodyCmd('WAVE:L')">👋 Wave L</div>
+      <div class="act-btn" onclick="bodyCmd('WAVE:R')">👋 Wave R</div>
+      <div class="act-btn" onclick="bodyCmd('CENTER')">⊙ Center</div>
+    </div>
+  </div>
 
-  // Runtime saved locations (from location_manager via /saved_locations)
-  let lastClick = null;            // {x, y, yaw} from last map click (for "Save last click")
-  let saveLocPub = null;
-  let deleteLocPub = null;
-  let savedLocations = {};         // name -> [x, y, yaw] (merged static + user-saved)
+</aside>
 
-  // ── Connection ──
-  function getIp() {
-    const q = new URLSearchParams(location.search).get('ip');
-    return q || document.getElementById('ip_input').value.trim();
-  }
-  function setStatus(state, text) {
-    const dot = document.getElementById('status_dot');
-    dot.className = 'dot' + (state === 'ok' ? ' ok' : state === 'warn' ? ' warn' : '');
-    document.getElementById('status_text').textContent = text;
-  }
+<main>
+  <canvas id="mapCanvas"></canvas>
+  <div class="map-hud">
+    <div class="hbadge">MAP SIZE: <span id="hud-map">WAITING</span></div>
+    <div class="hbadge">ZOOM LEVEL: <span id="hud-zoom">1.0x</span></div>
+    <div class="hbadge">CURSOR POS: <span id="hud-cur">0.00, 0.00</span></div>
+  </div>
+  <div class="zctrl">
+    <button class="btn" onclick="zoomMap(1.2)">+</button>
+    <button class="btn" onclick="zoomMap(0.83)">−</button>
+    <button class="btn" style="font-size:11px; padding: 0" onclick="resetView()">FIT</button>
+  </div>
+  <div class="map-hint" id="map-hint">🎯 Click & drag on map to set Navigation Goal direction</div>
+</main>
 
-  function connect() {
-    const ip = getIp();
-    if (!ip) { alert('Enter the Raspberry Pi IP address.'); return; }
-    if (ros) { try { ros.close(); } catch (e) {} }
-    setStatus('warn', 'connecting…');
+<div class="ipanel">
+  
+  <div class="slabel">Navigation Status</div>
+  <div class="sblock">
+    <div class="stat-row"><span>STATUS</span><span class="v warn" id="nav-state">IDLE</span></div>
+    <div class="stat-row"><span>GOAL X</span><span class="v" id="gx">---</span></div>
+    <div class="stat-row"><span>GOAL Y</span><span class="v" id="gy">---</span></div>
+  </div>
 
-    ros = new ROSLIB.Ros({ url: 'ws://' + ip + ':9090' });
+  <div class="slabel">AMCL Pose</div>
+  <div class="sblock">
+    <div class="stat-row"><span>POS X</span><span class="v" id="px">---</span></div>
+    <div class="stat-row"><span>POS Y</span><span class="v" id="py">---</span></div>
+    <div class="stat-row"><span>YAW</span><span class="v" id="pyaw">---</span></div>
+  </div>
 
-    ros.on('connection', () => { setStatus('ok', 'connected'); setupRos(); });
-    ros.on('error',  () => setStatus('bad', 'connection error'));
-    ros.on('close',  () => setStatus('bad', 'disconnected'));
-  }
+  <div class="slabel">Sensor Topics</div>
+  <div class="sblock">
+    <div class="stat-row"><span>/scan</span><span class="v" id="t-scan">WAIT</span></div>
+    <div class="stat-row"><span>/map</span><span class="v" id="t-map">WAIT</span></div>
+    <div class="stat-row"><span>/amcl</span><span class="v" id="t-amcl">WAIT</span></div>
+    <div class="stat-row"><span>/body</span><span class="v" id="t-body">WAIT</span></div>
+  </div>
 
-  function setupRos() {
-    // Publishers
-    goalPub = new ROSLIB.Topic({ ros, name: '/goal_pose', messageType: 'geometry_msgs/PoseStamped' });
-    bodyPub = new ROSLIB.Topic({ ros, name: '/robot/body/command', messageType: 'std_msgs/String' });
+  <div class="slabel">System Log</div>
+  <div class="log-box" id="log-box"></div>
 
-    // For persisting user-named points at runtime (synced to voice_node via location_manager)
-    saveLocPub   = new ROSLIB.Topic({ ros, name: '/save_location',   messageType: 'std_msgs/String' });
-    deleteLocPub = new ROSLIB.Topic({ ros, name: '/delete_location', messageType: 'std_msgs/String' });
+</div>
 
-    buildMap();
-    subscribeRobotPose();
-    subscribePath();
-    subscribeSensors();
-    subscribeTranscript();
-    subscribeSavedLocations();
-  }
+<footer>
+  <div class="fs"><span>MODE:</span><span class="v" id="ft-mode">MAP GOAL</span></div>
+  <div class="fsep"></div>
+  <div class="fs"><span>ROS BRIDGE:</span><span class="v" id="ft-ros">OFFLINE</span></div>
+  <div class="fsep"></div>
+  <div class="fs"><span>VELOCITY:</span><span class="v" id="ft-cmd">0.00 / 0.00</span></div>
+  <div class="fright">
+    <button class="btn red" id="cancel-btn" style="display:none;" onclick="cancelNav()">■ Cancel Goal</button>
+    <button class="btn red" onclick="stopMove()">🚨 EMERGENCY STOP</button>
+  </div>
+</footer>
 
-  // ── Map + costmap ──
-  function buildMap() {
-    document.getElementById('map_canvas').innerHTML = '';
-    viewer = new ROS2D.Viewer({ divID: 'map_canvas', width: 600, height: 600 });
-    gridClient = new ROS2D.OccupancyGridClient({
-      ros, rootObject: viewer.scene,
-      topic: '/global_costmap/costmap', continuous: true
-    });
-    gridClient.on('change', () => {
-      viewer.scaleToDimensions(gridClient.currentGrid.width, gridClient.currentGrid.height);
-      viewer.shift(gridClient.currentGrid.pose.position.x, gridClient.currentGrid.pose.position.y);
-      ensureOverlays();
-    });
-    attachClickToGoal();
-  }
+<div class="toast" id="toast"><span id="toast-msg"></span></div>
 
-  // Robot marker + path live in scene-local coords, which ros2d renders in ROS metres.
-  function ensureOverlays() {
-    if (!robotMarker) {
-      robotMarker = new ROS2D.NavigationArrow({
-        size: 0.4, strokeSize: 0.05, fillColor: createjs.Graphics.getRGB(61,165,255,0.9), pulse: false
-      });
-      viewer.scene.addChild(robotMarker);
-    }
-    if (!pathShape) {
-      pathShape = new createjs.Shape();
-      viewer.scene.addChild(pathShape);
-    }
-  }
+<script>
+// ═══════════════════════════════════════════════════════════
+//  GLOBAL LOCATION DICTIONARY (Dynamically Updated)
+// ═══════════════════════════════════════════════════════════
+const ROOMS = {
+    'room 1':           { x: 0.703,  y: -0.069, yaw: 1.75  },
+    'room 2':           { x:-0.127,  y: -0.235, yaw: 3.09  },
+    'room 3':           { x:-0.198,  y: -1.068, yaw: 1.83  },
+    'room 4':           { x:-2.0,    y:  1.5,   yaw: 0.0   },
+    'reception':        { x:-1.0,    y:  0.5,   yaw: 1.57  },
+    'lobby':            { x: 0.5,    y: -2.0,   yaw: 3.14  },
+    'home':             { x: 0.0,    y:  0.0,   yaw: 0.0   },
+};
 
-  function subscribeRobotPose() {
-    tfClient = new ROSLIB.TFClient({
-      ros, fixedFrame: 'map', angularThres: 0.02, transThres: 0.02, rate: 10.0
-    });
-    tfClient.subscribe('base_link', (tf) => {
-      ensureOverlays();
-      if (!robotMarker) return;
-      robotMarker.x = tf.translation.x;
-      robotMarker.y = -tf.translation.y;            // ros2d flips Y
-      const q = tf.rotation;
-      const yaw = Math.atan2(2*(q.w*q.z + q.x*q.y), 1 - 2*(q.y*q.y + q.z*q.z));
-      robotMarker.rotation = -yaw * 180 / Math.PI;
-      if (viewer) viewer.scene.update();
-    });
-  }
+// ═══════════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════════
+let ros = null, connected = false;
+let mapData = null, mapInfo = null;
+let robotPose = { x:0, y:0, yaw:0 };
+let scale = 2, offsetX = 0, offsetY = 0;
+let isDragging = false, dragStart = {};
+let goalDragStart = null, goalArrow = null;
+let moveInterval = null;
+let mode = 'goal';
 
-  function subscribePath() {
-    new ROSLIB.Topic({ ros, name: '/plan', messageType: 'nav_msgs/Path', throttle_rate: 250 })
-      .subscribe((msg) => {
-        ensureOverlays();
-        if (!pathShape) return;
-        const g = pathShape.graphics; g.clear();
-        g.setStrokeStyle(0.04).beginStroke('#36c275');
-        msg.poses.forEach((p, i) => {
-          const x = p.pose.position.x, y = -p.pose.position.y;
-          if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
-        });
-        g.endStroke();
-        if (viewer) viewer.scene.update();
-      });
-  }
+const canvas = document.getElementById('mapCanvas');
+const ctx    = canvas.getContext('2d');
+let cmdVelPub, goalPub, initialPosePub, bodyPub, saveLocationPub;
 
-  // ── Click anywhere on the map → publish a goal ──
-  function attachClickToGoal() {
-    const canvas = viewer.scene.canvas;
-    canvas.addEventListener('mousedown', (e) => {
-      const rect = canvas.getBoundingClientRect();
-      const gx = (e.clientX - rect.left) * (canvas.width / rect.width);
-      const gy = (e.clientY - rect.top)  * (canvas.height / rect.height);
-      // Inverse of the EaselJS scene transform (global = local*scale + translate).
-      const rosX = (gx - viewer.scene.x) / viewer.scene.scaleX;
-      const rosY = (gy - viewer.scene.y) / viewer.scene.scaleY;
-      lastClick = { x: rosX, y: rosY, yaw: 0.0 };
-      publishGoal(rosX, rosY, 0.0);
-      updateLastClickHint(rosX, rosY);
-    });
-  }
+// ═══════════════════════════════════════════════════════════
+//  QUICK NAVIGATION DROPDOWN HANDLER
+// ═══════════════════════════════════════════════════════════
+function goSelectedRoom() {
+    if(!connected) { showToast('Connect to ROS 2 first!'); return; }
+    const selectedKey = document.getElementById('room-select').value;
+    if(!selectedKey) { showToast('Please select a destination.'); return; }
+    const dest = ROOMS[selectedKey];
+    if(dest) { sendGoal(dest.x, dest.y, dest.yaw); }
+}
 
-  // ── Goal + body command publishers ──
-  function publishGoal(x, y, yaw) {
-    if (!goalPub) return;
-    const goal = new ROSLIB.Message({
-      header: { frame_id: 'map' },
-      pose: {
-        position: { x: x, y: y, z: 0 },
-        orientation: { x: 0, y: 0, z: Math.sin(yaw/2), w: Math.cos(yaw/2) }
-      }
-    });
-    goalPub.publish(goal);
-  }
-  function sendBody(cmd) {
-    if (bodyPub) bodyPub.publish(new ROSLIB.Message({ data: cmd }));
-  }
-
-  // Small hint so the user knows what will be saved when they hit "Save last click".
-  function updateLastClickHint(x, y) {
-    const el = document.getElementById('last_click_hint');
-    if (el) el.textContent = `Last click: (${x.toFixed(3)}, ${y.toFixed(3)}) — yaw 0. Click “Save last click” to name it.`;
-  }
-
-  // ── Sensors ──
-  function subscribeSensors() {
-    const grid = document.getElementById('us_grid');
-    grid.innerHTML = '';
-    US_SENSORS.forEach((name) => {
-      const cell = document.createElement('div');
-      cell.className = 'sensor'; cell.id = 'us_' + name;
-      cell.innerHTML = '<div>' + name.replace('_',' ') + '</div><div class="v">--</div>';
-      grid.appendChild(cell);
-      new ROSLIB.Topic({ ros, name: '/ultrasonic/' + name, messageType: 'sensor_msgs/Range', throttle_rate: 200 })
-        .subscribe((msg) => {
-          const m = msg.range;
-          const v = cell.querySelector('.v');
-          v.textContent = (m >= msg.max_range) ? '∞' : m.toFixed(2) + ' m';
-          cell.className = 'sensor' + (m < 0.4 ? ' hit' : m < 0.8 ? ' near' : '');
-        });
-    });
-    // Pit obstacles: any points in the cloud means at least one IR sees a drop-off.
-    new ROSLIB.Topic({ ros, name: '/pit_obstacles', messageType: 'sensor_msgs/PointCloud2', throttle_rate: 200 })
-      .subscribe((msg) => {
-        const box = document.getElementById('pit_box');
-        const n = msg.width || 0;
-        if (n > 0) { box.className = 'pit alert'; box.textContent = 'PIT DETECTED (' + n + ')'; }
-        else { box.className = 'pit'; box.textContent = 'Pit sensors: clear'; }
-      });
-  }
-
-  // ── Transcript ──
-  function subscribeTranscript() {
-    const log = document.getElementById('transcript');
-    new ROSLIB.Topic({ ros, name: '/robot/voice/command', messageType: 'std_msgs/String' })
-      .subscribe((msg) => {
-        const row = document.createElement('div');
-        const t = new Date().toLocaleTimeString();
-        row.textContent = t + '  “' + msg.data + '”';
-        log.prepend(row);
-        while (log.childElementCount > 50) log.removeChild(log.lastChild);
-      });
-  }
-
-  // ── Live sync of saved locations (latched topic from location_manager) ──
-  function subscribeSavedLocations() {
-    new ROSLIB.Topic({ ros, name: '/saved_locations', messageType: 'std_msgs/String' })
-      .subscribe((msg) => {
-        try {
-          const payload = JSON.parse(msg.data || '{}');
-          savedLocations = payload.locations || {};
-          buildSavedLocationButtons();
-        } catch (e) {
-          // eslint-disable-next-line no-console
-          console.warn('Bad /saved_locations payload', e);
-        }
-      });
-  }
-
-  function buildSavedLocationButtons() {
-    const box = document.getElementById('saved_locations');
-    if (!box) return;
-    box.innerHTML = '';
-    Object.keys(savedLocations).forEach((name) => {
-      const wrap = document.createElement('span');
-      wrap.style.display = 'inline-flex';
-      wrap.style.alignItems = 'center';
-      wrap.style.gap = '2px';
-
-      const b = document.createElement('button');
-      b.className = 'btn';
-      b.textContent = name;
-      b.onclick = () => {
-        const arr = savedLocations[name];
-        if (!arr) return;
-        const [x, y, yaw] = arr;
-        publishGoal(x, y, (yaw || 0));
-      };
-
-      const del = document.createElement('button');
-      del.className = 'btn';
-      del.textContent = '×';
-      del.title = 'Delete saved location';
-      del.onclick = (ev) => {
-        ev.stopPropagation();
-        deleteSavedLocation(name);
-      };
-
-      wrap.appendChild(b);
-      wrap.appendChild(del);
-      box.appendChild(wrap);
-    });
-  }
-
-  function saveLastClick() {
-    if (!saveLocPub) { alert('Connect first.'); return; }
-    if (!lastClick) { alert('Click on the map first to choose a point.'); return; }
-    const nameEl = document.getElementById('save_name');
-    const name = (nameEl && nameEl.value || '').trim();
-    if (!name) { alert('Enter a name for the location (e.g. abc).'); return; }
-
-    // JSON format understood by location_manager
-    const payload = JSON.stringify({
-      name: name,
-      x: lastClick.x,
-      y: lastClick.y,
-      yaw: lastClick.yaw || 0
-    });
-    saveLocPub.publish(new ROSLIB.Message({ data: payload }));
-    if (nameEl) nameEl.value = '';
-  }
-
-  function deleteSavedLocation(name) {
-    if (!deleteLocPub) return;
-    deleteLocPub.publish(new ROSLIB.Message({ data: name }));
-    // Rebuild happens automatically when the latched /saved_locations update arrives.
-  }
-
-  // ── UI wiring ──
-  function buildRoomButtons() {
-    const box = document.getElementById('rooms');
-    Object.keys(ROOMS).forEach((name) => {
-      const b = document.createElement('button');
-      b.className = 'btn'; b.textContent = name;
-      b.onclick = () => { const [x,y,yaw] = ROOMS[name]; publishGoal(x, y, yaw); };
-      box.appendChild(b);
-    });
-  }
-
-  document.addEventListener('DOMContentLoaded', () => {
-    buildRoomButtons();
-    // Saved locations controls (panel is always in DOM; buttons are populated live)
-    const saveBtn = document.getElementById('save_last_btn');
-    if (saveBtn) saveBtn.onclick = saveLastClick;
-
-    document.getElementById('connect_btn').onclick = connect;
-    document.querySelectorAll('[data-cmd]').forEach((b) => {
-      b.onclick = () => sendBody(b.getAttribute('data-cmd'));
-    });
-    // Pre-fill IP from ?ip= and auto-connect if present.
-    const q = new URLSearchParams(location.search).get('ip');
-    if (q) { document.getElementById('ip_input').value = q; connect(); }
+// ═══════════════════════════════════════════════════════════
+//  ROS CONNECTION
+// ═══════════════════════════════════════════════════════════
+function connectROS() {
+  const url = document.getElementById('ros-ip').value.trim();
+  ros = new ROSLIB.Ros({ url });
+  ros.on('connection', () => {
+    connected = true;
+    document.getElementById('ros-dot').classList.add('on');
+    document.getElementById('conn-label').textContent = 'Online';
+    document.getElementById('btn-conn').style.display = 'none';
+    document.getElementById('btn-disc').style.display = '';
+    document.getElementById('ft-ros').textContent = url.replace('ws://','').replace(':9090','');
+    log('Connected to rosbridge!', 'o');
+    setupTopics();
   });
-  </script>
+  ros.on('error', () => log('ROS connection error.', 'e'));
+  ros.on('close', () => {
+    connected = false;
+    document.getElementById('ros-dot').classList.remove('on');
+    document.getElementById('conn-label').textContent = 'Offline';
+    document.getElementById('ft-ros').textContent = 'OFFLINE';
+    document.getElementById('btn-conn').style.display = '';
+    document.getElementById('btn-disc').style.display = 'none';
+    log('Disconnected.', 'w');
+  });
+}
+function disconnectROS() { if(ros) ros.close(); }
+
+// ═══════════════════════════════════════════════════════════
+//  SETUP ROS TOPICS
+// ═══════════════════════════════════════════════════════════
+function setupTopics() {
+  cmdVelPub      = new ROSLIB.Topic({ ros, name:'/cmd_vel',          messageType:'geometry_msgs/Twist' });
+  goalPub        = new ROSLIB.Topic({ ros, name:'/goal_pose',        messageType:'geometry_msgs/PoseStamped' });
+  initialPosePub = new ROSLIB.Topic({ ros, name:'/initialpose',      messageType:'geometry_msgs/PoseWithCovarianceStamped' });
+  bodyPub        = new ROSLIB.Topic({ ros, name:'/robot/body/command', messageType:'std_msgs/String' });
+  // /save_location is the input topic that location_manager listens on;
+  // it persists to disk and re-publishes the correct latched /saved_locations for voice node.
+  saveLocationPub= new ROSLIB.Topic({ ros, name:'/save_location',    messageType:'std_msgs/String' });
+
+  // Subscribe to voice commands from speech recognition node
+  const voiceSub = new ROSLIB.Topic({ ros, name:'/robot/voice/command', messageType:'std_msgs/String' });
+  voiceSub.subscribe(msg => handleVoiceCommand(msg.data));
+  log('Voice command listener active on /robot/voice/command', 'i');
+
+  document.getElementById('t-body').textContent = 'OK'; document.getElementById('t-body').className = 'v ok';
+  new ROSLIB.Topic({ ros, name:'/map', messageType:'nav_msgs/OccupancyGrid', throttle_rate:3000 }).subscribe(msg => {
+      mapData = msg.data; mapInfo = msg.info;
+      document.getElementById('t-map').textContent = 'OK'; document.getElementById('t-map').className = 'v ok';
+      document.getElementById('hud-map').textContent = `${msg.info.width}×${msg.info.height}`;
+      fitMapToView(); renderMap();
+  });
+  new ROSLIB.Topic({ ros, name:'/amcl_pose', messageType:'geometry_msgs/PoseWithCovarianceStamped', throttle_rate:400 }).subscribe(msg => {
+      const p = msg.pose.pose; robotPose = { x:p.position.x, y:p.position.y, yaw:q2yaw(p.orientation) };
+      document.getElementById('px').textContent   = robotPose.x.toFixed(3);
+      document.getElementById('py').textContent   = robotPose.y.toFixed(3);
+      document.getElementById('pyaw').textContent = (robotPose.yaw*180/Math.PI).toFixed(1)+'°';
+      document.getElementById('t-amcl').textContent = 'OK'; document.getElementById('t-amcl').className = 'v ok';
+      renderMap();
+  });
+  new ROSLIB.Topic({ ros, name:'/scan', messageType:'sensor_msgs/LaserScan', throttle_rate:2000 }).subscribe(() => { 
+      document.getElementById('t-scan').textContent='OK'; document.getElementById('t-scan').className='v ok'; 
+  });
+
+  // Nav2 action status — surface arrival / failure in the UI
+  new ROSLIB.Topic({ ros, name:'/navigate_to_pose/_action/status',
+                     messageType:'action_msgs/GoalStatusArray' }).subscribe(msg => {
+    if (!msg.status_list || !msg.status_list.length) return;
+    const s = msg.status_list[msg.status_list.length - 1].status;
+    if (s === 4) {         // SUCCEEDED
+      document.getElementById('nav-state').textContent = 'REACHED';
+      document.getElementById('nav-state').className = 'v ok';
+      document.getElementById('cancel-btn').style.display = 'none';
+      goalArrow = null; renderMap();
+      log('Goal reached — robot arrived at target.', 'o');
+      showToast('Arrived at target');
+    } else if (s === 6) { // ABORTED — planner/controller gave up
+      document.getElementById('nav-state').textContent = 'FAILED';
+      document.getElementById('nav-state').className = 'v err';
+      document.getElementById('cancel-btn').style.display = 'none';
+      goalArrow = null; renderMap();
+      log('Goal FAILED — target unreachable / path blocked.', 'e');
+      showToast('Navigation failed: target unreachable');
+    } else if (s === 5) { // CANCELED
+      document.getElementById('nav-state').textContent = 'CANCELLED';
+      document.getElementById('nav-state').className = 'v err';
+      document.getElementById('cancel-btn').style.display = 'none';
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+//  MAP RENDERING
+// ═══════════════════════════════════════════════════════════
+function fitMapToView() {
+  if(!mapInfo) return;
+  const p = canvas.parentElement; canvas.width = p.clientWidth; canvas.height = p.clientHeight;
+  scale = Math.min(p.clientWidth/mapInfo.width, p.clientHeight/mapInfo.height)*0.9;
+  offsetX = (p.clientWidth  - mapInfo.width  * scale)/2; offsetY = (p.clientHeight - mapInfo.height * scale)/2;
+  document.getElementById('hud-zoom').textContent = scale.toFixed(2)+'x';
+}
+
+function renderMap() {
+  canvas.width = canvas.parentElement.clientWidth; canvas.height = canvas.parentElement.clientHeight;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  if(!mapData||!mapInfo){
+    ctx.fillStyle='rgba(56, 189, 248, 0.2)'; ctx.font='14px Inter'; ctx.textAlign='center';
+    ctx.fillText('Connect ROS to synchronize Nav2 Map',canvas.width/2,canvas.height/2); return;
+  }
+  const W=mapInfo.width,H=mapInfo.height; const img=ctx.createImageData(W,H);
+  for(let i=0;i<mapData.length;i++){
+    const v=mapData[i]; let r,g,b;
+    if(v===-1){r=15;g=23;b=42;} else if(v>=65){r=2;g=6;b=23;} else{r=241;g=245;b=249;}
+    img.data[i*4]=r;img.data[i*4+1]=g;img.data[i*4+2]=b;img.data[i*4+3]=255;
+  }
+  const off=document.createElement('canvas');off.width=W;off.height=H;
+  off.getContext('2d').putImageData(img,0,0);
+  ctx.save(); ctx.translate(offsetX,offsetY);ctx.scale(scale,scale); ctx.translate(0,H);ctx.scale(1,-1); ctx.drawImage(off,0,0); ctx.restore();
+
+  // Draw points from Dictionary
+  for (const [key, dest] of Object.entries(ROOMS)) {
+      const rp = w2c(dest.x, dest.y);
+      ctx.beginPath(); ctx.arc(rp.x, rp.y, 4, 0, Math.PI*2);
+      ctx.fillStyle = '#10b981'; ctx.fill();
+  }
+
+  if(goalArrow) drawArrow(goalArrow.x,goalArrow.y,goalArrow.angle,'#38bdf8',24);
+  const rp=w2c(robotPose.x,robotPose.y); drawRobot(rp.x,rp.y,-robotPose.yaw);
+}
+
+function drawRobot(cx,cy,yaw){
+  ctx.save();ctx.translate(cx,cy);ctx.rotate(yaw);
+  ctx.beginPath();ctx.arc(0,0,12,0,Math.PI*2); ctx.fillStyle='rgba(16, 185, 129, 0.3)';ctx.fill();
+  ctx.strokeStyle='#10b981';ctx.lineWidth=2.5;ctx.stroke();
+  ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(16,0); ctx.strokeStyle='#10b981';ctx.lineWidth=3;ctx.stroke(); ctx.restore();
+}
+
+function drawArrow(cx,cy,angle,color,sz){
+  ctx.save();ctx.translate(cx,cy);ctx.rotate(angle);
+  ctx.beginPath();ctx.arc(0,0,sz*.55,0,Math.PI*2);
+  ctx.strokeStyle=color;ctx.lineWidth=2;ctx.setLineDash([3,3]);ctx.stroke();ctx.setLineDash([]);
+  ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(sz,0);ctx.strokeStyle=color;ctx.lineWidth=3;ctx.stroke();
+  ctx.beginPath();ctx.moveTo(sz,0);ctx.lineTo(sz-8,-5);ctx.lineTo(sz-8,5);ctx.closePath();
+  ctx.fillStyle=color;ctx.fill(); ctx.restore();
+}
+
+function w2c(wx,wy){ if(!mapInfo)return{x:0,y:0}; return{ x:offsetX+((wx-mapInfo.origin.position.x)/mapInfo.resolution)*scale, y:offsetY+(mapInfo.height-(wy-mapInfo.origin.position.y)/mapInfo.resolution)*scale }; }
+function c2w(cx,cy){ if(!mapInfo)return{x:0,y:0}; return{ x:mapInfo.origin.position.x+((cx-offsetX)/scale)*mapInfo.resolution, y:mapInfo.origin.position.y+(mapInfo.height-(cy-offsetY)/scale)*mapInfo.resolution }; }
+function q2yaw(q){return Math.atan2(2*(q.w*q.z+q.x*q.y),1-2*(q.y*q.y+q.z*q.z));}
+function yaw2q(y){return{x:0,y:0,z:Math.sin(y/2),w:Math.cos(y/2)};}
+
+// ═══════════════════════════════════════════════════════════
+//  CANVAS EVENTS (CLICK TO SAVE ADDED)
+// ═══════════════════════════════════════════════════════════
+let clickStart=null;
+canvas.addEventListener('mousedown',e=>{
+  if(e.button===1||e.button===2){isDragging=true;dragStart={x:e.clientX-offsetX,y:e.clientY-offsetY};return;}
+  clickStart={x:e.clientX,y:e.clientY};
+  if(mode==='goal'||mode==='pose'||mode==='add'){const r=canvas.getBoundingClientRect();goalDragStart=c2w(e.clientX-r.left,e.clientY-r.top);}
+});
+canvas.addEventListener('mousemove',e=>{
+  const r=canvas.getBoundingClientRect(); const w=c2w(e.clientX-r.left,e.clientY-r.top);
+  document.getElementById('hud-cur').textContent=`${w.x.toFixed(2)}, ${w.y.toFixed(2)}`;
+  if(isDragging){offsetX=e.clientX-dragStart.x;offsetY=e.clientY-dragStart.y;renderMap();return;}
+  if(goalDragStart&&(mode==='goal'||mode==='pose'||mode==='add')){
+    const a=Math.atan2(-(w.y-goalDragStart.y),w.x-goalDragStart.x);
+    const cp=w2c(goalDragStart.x,goalDragStart.y); goalArrow={x:cp.x,y:cp.y,angle:-a};renderMap();
+  }
+});
+canvas.addEventListener('mouseup',e=>{
+  if(isDragging){isDragging=false;return;}
+  if(!clickStart)return; clickStart=null;
+  const r=canvas.getBoundingClientRect(); const wp=c2w(e.clientX-r.left,e.clientY-r.top);
+  
+  if(mode==='goal'&&goalDragStart){
+    const a=Math.atan2(-(wp.y-goalDragStart.y),wp.x-goalDragStart.x); sendGoal(goalDragStart.x,goalDragStart.y,a); goalDragStart=null;
+  }
+  else if(mode==='pose'&&goalDragStart){
+    const a=Math.atan2(-(wp.y-goalDragStart.y),wp.x-goalDragStart.x); sendInitialPose(goalDragStart.x,goalDragStart.y,a); goalDragStart=null;
+  }
+  // ── NEW LOGIC: SAVE LOCATION TO DROPDOWN ──
+  else if(mode==='add') {
+     let a = 0; let tx = wp.x, ty = wp.y;
+     if(goalDragStart) {
+        const dist = Math.hypot(wp.x-goalDragStart.x, wp.y-goalDragStart.y);
+        if(dist > 0.1) { a = Math.atan2(-(wp.y-goalDragStart.y), wp.x-goalDragStart.x); } // They dragged for yaw
+        tx = goalDragStart.x; ty = goalDragStart.y;
+     }
+     
+     // Ask user for a name
+     const locName = prompt(`Saving coordinates: (X: ${tx.toFixed(2)}, Y: ${ty.toFixed(2)})\nEnter a custom name for this new location:`);
+     if(locName && locName.trim() !== '') {
+         const id = locName.trim().toLowerCase();
+         ROOMS[id] = { x: tx, y: ty, yaw: a };
+
+         // Inject the new room into the HTML dropdown
+         const sel = document.getElementById('room-select');
+         const opt = document.createElement('option');
+         opt.value = id; opt.textContent = locName.trim();
+         sel.appendChild(opt);
+
+         // Tell location_manager to persist the new entry and relay it to the voice node
+         saveLocation(id, tx, ty, a);
+         log(`Location saved: "${locName.trim()}" (${tx.toFixed(2)}, ${ty.toFixed(2)}) — voice nav enabled`, 'o');
+
+         showToast(`Saved '${locName}' to Quick Navigation!`);
+         setMode('goal'); // Return to normal goal mode immediately so they can drive to it
+     }
+     goalDragStart=null; goalArrow=null; renderMap();
+  }
+});
+canvas.addEventListener('contextmenu',e=>e.preventDefault());
+canvas.addEventListener('wheel',e=>{
+  const f=e.deltaY<0?1.15:0.87; const r=canvas.getBoundingClientRect(); const mx=e.clientX-r.left,my=e.clientY-r.top;
+  offsetX=mx-(mx-offsetX)*f;offsetY=my-(my-offsetY)*f;scale*=f; document.getElementById('hud-zoom').textContent=scale.toFixed(2)+'x'; renderMap();e.preventDefault();
+},{passive:false});
+
+// ═══════════════════════════════════════════════════════════
+//  NAVIGATION ACTIONS
+// ═══════════════════════════════════════════════════════════
+function sendGoal(x,y,yaw){
+  if(!connected){showToast('Not connected!');return;}
+  goalPub.publish(new ROSLIB.Message({header:{frame_id:'map'},pose:{position:{x,y,z:0},orientation:yaw2q(yaw)}}));
+  document.getElementById('gx').textContent=x.toFixed(3); document.getElementById('gy').textContent=y.toFixed(3);
+  document.getElementById('nav-state').textContent='NAVIGATING'; document.getElementById('nav-state').className='v warn';
+  document.getElementById('cancel-btn').style.display='';
+  log(`Nav Goal → (${x.toFixed(2)},${y.toFixed(2)})`,'o'); showToast('Navigation Goal Sent');
+}
+
+function sendInitialPose(x,y,yaw){
+  if(!connected){showToast('Not connected!');return;}
+  const cov=Array(36).fill(0);cov[0]=0.25;cov[7]=0.25;cov[35]=0.0685;
+  initialPosePub.publish(new ROSLIB.Message({header:{frame_id:'map'},pose:{pose:{position:{x,y,z:0},orientation:yaw2q(yaw)},covariance:cov}}));
+  log(`Init pose → (${x.toFixed(2)},${y.toFixed(2)})`,'o'); showToast('Pose Initialized');
+}
+
+function cancelNav(){
+  stopMove();
+  document.getElementById('nav-state').textContent='CANCELLED'; document.getElementById('nav-state').className='v err';
+  document.getElementById('cancel-btn').style.display='none';
+  goalArrow=null;renderMap(); log('Navigation cancelled.','w');
+}
+
+// ═══════════════════════════════════════════════════════════
+//  TELEOP & BODY COMMANDS
+// ═══════════════════════════════════════════════════════════
+function startMove(lin,ang){
+  if(!connected){return;}
+  const lv=lin*(parseFloat(document.getElementById('lin-spd').value)/0.2); const av=ang*(parseFloat(document.getElementById('ang-spd').value)/0.5);
+  if(moveInterval)clearInterval(moveInterval);
+  const pub=()=>{ cmdVelPub.publish(new ROSLIB.Message({linear:{x:lv,y:0,z:0},angular:{x:0,y:0,z:av}})); document.getElementById('ft-cmd').textContent=`${lv.toFixed(2)} / ${av.toFixed(2)}`; };
+  pub();moveInterval=setInterval(pub,100);
+}
+function stopMove(){
+  if(moveInterval){clearInterval(moveInterval);moveInterval=null;}
+  if(cmdVelPub)cmdVelPub.publish(new ROSLIB.Message({linear:{x:0,y:0,z:0},angular:{x:0,y:0,z:0}}));
+  document.getElementById('ft-cmd').textContent='0.00 / 0.00';
+}
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT')return;
+  const k={ArrowUp:[0.2,0],ArrowDown:[-0.2,0],ArrowLeft:[0,0.5],ArrowRight:[0,-0.5]};
+  if(k[e.key]&&!moveInterval)startMove(k[e.key][0],k[e.key][1]);
+  if(e.key===' '){stopMove();e.preventDefault();}
+});
+document.addEventListener('keyup',e=>{if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key))stopMove();});
+
+function bodyCmd(cmd){
+  if(!connected){showToast('Connect ROS first!');return;}
+  bodyPub.publish(new ROSLIB.Message({data:cmd})); log(`Animation → <${cmd}>`,'i');
+}
+
+// ═══════════════════════════════════════════════════════════
+//  SAVED LOCATIONS — PUBLISH & VOICE COMMAND HANDLER
+// ═══════════════════════════════════════════════════════════
+function saveLocation(name, x, y, yaw) {
+  if (!saveLocationPub) return;
+  // location_manager expects: {"name": "...", "x": ..., "y": ..., "yaw": ...}
+  // It will persist to disk and re-publish the latched /saved_locations so the voice node updates.
+  saveLocationPub.publish(new ROSLIB.Message({ data: JSON.stringify({ name, x, y, yaw }) }));
+}
+
+function handleVoiceCommand(text) {
+  const lower = text.toLowerCase().trim();
+  log(`Voice ← "${text}"`, 'i');
+
+  // 1. Exact key match
+  if (ROOMS[lower]) {
+    const d = ROOMS[lower];
+    showToast(`Voice: navigating to "${lower}"`);
+    sendGoal(d.x, d.y, d.yaw);
+    return;
+  }
+
+  // 2. Partial match — voice text contains the key or vice-versa
+  for (const [key, d] of Object.entries(ROOMS)) {
+    if (lower.includes(key) || key.includes(lower)) {
+      showToast(`Voice: navigating to "${key}"`);
+      sendGoal(d.x, d.y, d.yaw);
+      return;
+    }
+  }
+
+  log(`Voice: no matching location for "${text}"`, 'w');
+  showToast(`Unknown location: "${text}"`);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  UI HELPERS
+// ═══════════════════════════════════════════════════════════
+const HINTS={
+  goal:   '🎯 Click & drag on map to set NAVIGATION GOAL direction',
+  add:    '➕ Click (or click & drag for direction) to SAVE A NEW LOCATION',
+  teleop: '🕹 Use Arrows/On-screen D-Pad to drive manually',
+  pose:   '📌 Click & drag to set INITIAL POSE for AMCL localization'
+};
+function setMode(m){
+  mode=m; goalDragStart=null;
+  ['goal','teleop','pose','add'].forEach(n=>{ document.getElementById('mode-'+n).className='mbtn'; });
+  document.getElementById('mode-'+m).className='mbtn act '+(m==='add'?'add':'');
+  document.getElementById('map-hint').textContent=HINTS[m];
+  document.getElementById('ft-mode').textContent=m.toUpperCase();
+  if(m!=='goal'&&m!=='add'){goalArrow=null;renderMap();}
+}
+function log(msg,type='i'){
+  const b=document.getElementById('log-box'); const d=document.createElement('div');
+  d.className='le '+type;d.textContent=msg;
+  b.appendChild(d);b.scrollTop=b.scrollHeight; if(b.children.length>50)b.removeChild(b.firstChild);
+}
+let toastTimer;
+function showToast(msg){
+  document.getElementById('toast-msg').textContent=msg; document.getElementById('toast').classList.add('show');
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>document.getElementById('toast').classList.remove('show'),3000);
+}
+window.addEventListener('resize',()=>{if(mapData){fitMapToView();renderMap();}});
+function zoomMap(f){ const cx=canvas.width/2,cy=canvas.height/2; offsetX=cx-(cx-offsetX)*f;offsetY=cy-(cy-offsetY)*f;scale*=f; document.getElementById('hud-zoom').textContent=scale.toFixed(2)+'x'; renderMap(); }
+function resetView(){fitMapToView();renderMap();}
+
+setMode('goal');
+log('OmniServ Terminal Ready.','i');
+</script>
 </body>
 </html>
