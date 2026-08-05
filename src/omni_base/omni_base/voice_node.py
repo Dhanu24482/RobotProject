@@ -336,7 +336,8 @@ class VoiceNode(Node):
             ''     — only the bare name was spoken; caller should acknowledge.
             str    — the command text with the name prefix removed.
         """
-        pattern = r'^' + re.escape(self.robot_name) + r'\b'
+        # Requires a greeting prefix: (hey|hi|hello) lumi <command>
+        pattern = r'^(?:hey|hi|hello)\s+' + re.escape(self.robot_name) + r'\b'
         m = re.match(pattern, text)
         if not m:
             return None
