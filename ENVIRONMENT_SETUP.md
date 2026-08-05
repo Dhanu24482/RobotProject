@@ -161,7 +161,10 @@ pip3 install \
   pyserial \
   SpeechRecognition \
   google-genai \
-  gTTS
+  gTTS \
+  adafruit-circuitpython-rgb-display \
+  adafruit-blinka \
+  pillow
 ```
 
 ### Verify each one
@@ -171,6 +174,8 @@ python3 -c "import serial; print('pyserial OK')"
 python3 -c "import speech_recognition; print('SpeechRecognition OK')"
 python3 -c "from google import genai; print('google-genai OK')"
 python3 -c "from gtts import gTTS; print('gTTS OK')"
+python3 -c "import adafruit_rgb_display; print('adafruit display OK')"
+python3 -c "from PIL import Image; print('Pillow OK')"
 ```
 
 ### PyAudio (required by SpeechRecognition for microphone access)
@@ -313,6 +318,73 @@ cd ~/ros2_ws
 > manually, stop the node first or the upload fails with "port busy".
 
 See [firmware/README.md](firmware/README.md) for the full pinout and serial protocol.
+
+---
+
+## 7b. Configure Eye Displays (Dual ILI9341 TFT)
+
+The robot's eyes are two 2.4" ILI9341 320x240 TFT displays driven directly from the Raspberry Pi's hardware SPI0 bus by `eyes_node`.
+
+### Enable SPI
+
+```bash
+sudo raspi-config
+# Interface Options → SPI → Yes → Finish → Reboot
+```
+
+Verify the SPI device appears after reboot:
+
+```bash
+ls /dev/spidev0.*
+# Expected: /dev/spidev0.0  /dev/spidev0.1
+```
+
+### Wiring (both displays share power, clock, data, D/C, and RESET)
+
+| Display Pin | Raspberry Pi 4 Pin | GPIO |
+|-------------|-------------------|------|
+| VCC | Pin 1 (3.3 V) | — |
+| GND | Pin 6 (GND) | — |
+| SCK | Pin 23 | GPIO 11 (SCLK) |
+| SDI (MOSI) | Pin 19 | GPIO 10 (MOSI) |
+| D/C | Pin 18 | GPIO 24 |
+| RESET | Pin 22 | GPIO 25 |
+| LED | Pin 2 or 4 (5 V) | — (pulls from 5 V to prevent dimming) |
+| CS (Left eye) | Pin 24 | GPIO 8 / CE0 |
+| CS (Right eye) | Pin 26 | GPIO 7 / CE1 |
+
+### Install Python display libraries
+
+```bash
+pip3 install adafruit-circuitpython-rgb-display adafruit-blinka pillow
+```
+
+### Add user to `spi` and `gpio` groups
+
+```bash
+sudo usermod -aG spi,gpio $USER
+# Log out and back in for this to take effect
+```
+
+### Verify the displays initialise
+
+```bash
+ros2 run omni_base eyes_node
+# Expected log line: "eyes_node: ILI9341 displays initialized."
+# Both displays should show a neutral expression (blue dash on black).
+```
+
+You can test expressions manually by publishing to `/robot/emotion`:
+
+```bash
+ros2 topic pub --once /robot/emotion std_msgs/String "{data: 'happy'}"
+ros2 topic pub --once /robot/emotion std_msgs/String "{data: 'surprised'}"
+ros2 topic pub --once /robot/emotion std_msgs/String "{data: 'angry'}"
+ros2 topic pub --once /robot/emotion std_msgs/String "{data: 'sad'}"
+ros2 topic pub --once /robot/emotion std_msgs/String "{data: 'blink'}"
+```
+
+> **Dev machine (Windows/non-Pi):** `eyes_node` starts in headless mode automatically if the Adafruit libraries are unavailable — it still subscribes and logs emotions, so the ROS graph never breaks.
 
 ---
 
@@ -559,7 +631,8 @@ sudo apt install -y \
   python3-colcon-common-extensions
 
 # 4. Python
-pip3 install pyserial SpeechRecognition google-genai gTTS
+pip3 install pyserial SpeechRecognition google-genai gTTS \
+  adafruit-circuitpython-rgb-display adafruit-blinka pillow
 sudo apt install -y portaudio19-dev python3-pyaudio && pip3 install pyaudio
 
 # 5. Audio tools

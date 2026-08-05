@@ -72,4 +72,13 @@ def generate_launch_description():
                 'min_pwm': min_pwm,
             }],
         ),
+
+        # Dual ILI9341 TFT eye displays (Pi SPI0, CE0=left CE1=right)
+        # Import-guarded: starts headless on non-Pi systems with no SPI hardware.
+        Node(
+            package='omni_base',
+            executable='eyes_node',
+            name='eyes_node',
+            output='screen',
+        ),
     ])

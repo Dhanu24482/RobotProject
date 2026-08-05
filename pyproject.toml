@@ -9,4 +9,8 @@ dependencies = [
     "gtts>=2.5.4",
     "pyserial>=3.5",
     "speechrecognition>=3.16.1",
+    # Pi-only (eyes_node): import-guarded so the Windows dev box still works
+    "adafruit-circuitpython-rgb-display",
+    "adafruit-blinka",
+    "pillow",
 ]

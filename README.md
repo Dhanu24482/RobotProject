@@ -14,9 +14,10 @@ A ROS 2 (Humble) workspace for a voice-controlled, LiDAR-based autonomous servic
 
 1. [System Overview](#1-system-overview)
 2. [Repository Layout](#2-repository-layout)
-3. [The Two Core Nodes](#3-the-two-core-nodes)
+3. [The Core Nodes](#3-the-core-nodes)
    - [arduino_bridge](#31-arduino_bridge)
    - [voice_node (Varys)](#32-voice_node--varys)
+   - [eyes_node](#33-eyes_node)
 4. [Localization, Mapping & Navigation](#4-localization-mapping--navigation)
 5. [Robot Model (URDF)](#5-robot-model-urdf)
 6. [Web Interface](#6-web-interface)
@@ -33,14 +34,17 @@ A ROS 2 (Humble) workspace for a voice-controlled, LiDAR-based autonomous servic
 ```
                   ┌────────────────────────────────────────────────┐
                   │              Raspberry Pi (ROS 2 Humble)        │
-  🎤 Mic ────────▶│  voice_node                                     │
+  Mic ───────────▶│  voice_node                                     │
                   │   ├─ SpeechRecognition (Google STT)             │
                   │   ├─ Gemini 2.5 Flash (AI Q&A)                  │
-  🔊 Speaker ◀───│   └─ TTS: gTTS → pico2wave → espeak (fallback)  │
+  Speaker ◀──────│   └─ TTS: gTTS → pico2wave → espeak (fallback)  │
                   │        │                                         │
                   │        ▼  publishes                              │
                   │   /goal_pose ──────▶ Nav2 stack ──▶ /cmd_vel ──┐│
                   │   /robot/body/command ──────────────────────────┘│
+                  │   /robot/emotion ──▶ eyes_node                   │
+                  │                          ├─▶ Left ILI9341 TFT    │
+                  │                          └─▶ Right ILI9341 TFT   │
                   │                                             │     │
   RPLiDAR A1 ────▶│  sllidar_ros2 ──▶ /scan                    │     │
                   │      └──▶ rf2o_laser_odometry               │     │
@@ -50,7 +54,7 @@ A ROS 2 (Humble) workspace for a voice-controlled, LiDAR-based autonomous servic
                                                   arduino_bridge (serial)
                                                          │  <L,R>  <NOD> …
                                                          ▼
-                                                  🤖 Arduino Mega
+                                                  Arduino Mega
                                                   (DC motors + servos)
 ```
 
@@ -88,7 +92,7 @@ ros2_ws/
 
 ---
 
-## 3. The Two Core Nodes
+## 3. The Core Nodes
 
 ### 3.1 `arduino_bridge`
 
@@ -142,6 +146,7 @@ The robot's brain: continuous microphone listener → speech-to-text → command
 | `/robot/voice/command` | `std_msgs/String` | Raw recognized speech text |
 | `/robot/head/pose` | `std_msgs/Float32MultiArray` | Head servo target pose |
 | `/robot/hands/pose` | `std_msgs/Float32MultiArray` | Hands servo target pose |
+| `/robot/emotion` | `std_msgs/String` | Current emotion name for the eye displays |
 
 **Routing flow**
 
@@ -189,6 +194,65 @@ Microphone → Google STT → text
 **AI integration**
 
 Requires the `GEMINI_API_KEY` environment variable. Uses `google-genai` with a persistent chat session (`gemini-2.5-flash`). System prompt keeps answers ≤ 2 sentences and in-character as "Varys the robot". The node starts and works fully without the key; only open-ended AI questions are degraded.
+
+---
+
+### 3.3 `eyes_node`
+
+**File:** `src/omni_base/omni_base/eyes_node.py`
+
+Drives two 2.4" ILI9341 320x240 TFT displays connected to the Pi's hardware SPI0 bus. Each time `voice_node` publishes an emotion, `eyes_node` renders the matching expression on both eyes simultaneously using Pillow frame buffers pushed in one shot (flicker-free).
+
+**Subscription**
+
+| Topic | Type | Description |
+|-------|------|-------------|
+| `/robot/emotion` | `std_msgs/String` | Emotion name to display |
+
+**Supported emotion names**
+
+| Name | Expression |
+|------|------------|
+| `neutral` | Blue rounded rectangle dash — default / idle |
+| `happy` | Upper-half crescent (arch) |
+| `surprised` | Hollow ring |
+| `angry` | Ellipse with triangular brow mask |
+| `sad` | Lower-half crescent |
+| `blink` | Transient thin closed-lid, then restores previous emotion |
+
+**Emotion triggers (set by `voice_node`)**
+
+| Action | Emotion |
+|--------|---------|
+| Startup | `happy` |
+| Wake-word ack ("Yes?") | `surprised` |
+| AI question (thinking) | `surprised` |
+| AI answer | `happy` |
+| AI error / unavailable | `sad` |
+| Navigation start | `neutral` |
+| Arrived | `happy` |
+| Path blocked / aborted | `sad` |
+| Unknown location | `sad` |
+| Nod | `happy` |
+| Shake | `angry` |
+| Stop / emergency stop | `surprised` |
+| Wave / hands up | `happy` |
+| Movement / reset | `neutral` |
+| "blink" / "wink" command | `blink` |
+
+**Hardware pins (SPI0, shared bus)**
+
+| Signal | Pi Pin | GPIO |
+|--------|--------|------|
+| SCK | 23 | GPIO 11 |
+| MOSI | 19 | GPIO 10 |
+| D/C | 18 | GPIO 24 |
+| RESET | 22 | GPIO 25 |
+| CS Left | 24 | GPIO 8 / CE0 |
+| CS Right | 26 | GPIO 7 / CE1 |
+| LED | 2 or 4 | 5 V |
+
+**Import-guarded:** on non-Pi systems (or when SPI is disabled) the node starts headless — it still subscribes and logs emotion changes, so the ROS graph never breaks. Enable SPI with `sudo raspi-config → Interface Options → SPI`. See [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md#7b-configure-eye-displays-dual-ili9341-tft) for full wiring and setup.
 
 ---
 
@@ -475,12 +539,24 @@ ros2 topic pub --once /robot/body/command std_msgs/String "{data: '<EBLINK>'}"
 ros2 topic pub --once /robot/body/command std_msgs/String "{data: '<CENTER>'}"
 ```
 
+### Eye emotions
+
+```bash
+ros2 topic pub --once /robot/emotion std_msgs/String "{data: 'happy'}"
+ros2 topic pub --once /robot/emotion std_msgs/String "{data: 'surprised'}"
+ros2 topic pub --once /robot/emotion std_msgs/String "{data: 'angry'}"
+ros2 topic pub --once /robot/emotion std_msgs/String "{data: 'sad'}"
+ros2 topic pub --once /robot/emotion std_msgs/String "{data: 'blink'}"
+ros2 topic pub --once /robot/emotion std_msgs/String "{data: 'neutral'}"
+```
+
 ### Monitor topics
 
 ```bash
 ros2 topic echo /scan                        # LiDAR data
 ros2 topic echo /odom                        # rf2o odometry
 ros2 topic echo /robot/voice/command         # what voice_node heard
+ros2 topic echo /robot/emotion               # current eye expression
 ros2 topic echo /cmd_vel                     # Nav2 velocity commands
 ros2 topic list                              # all active topics
 ```
@@ -509,6 +585,9 @@ ros2 topic list                              # all active topics
 | `SpeechRecognition` | 3.16+ | Microphone + Google STT |
 | `google-genai` | 2.8+ | Gemini 2.5 Flash API |
 | `gTTS` | 2.5+ | Google Text-to-Speech |
+| `adafruit-circuitpython-rgb-display` | latest | ILI9341 TFT driver (Pi SPI) |
+| `adafruit-blinka` | latest | CircuitPython hardware abstraction for Linux |
+| `pillow` | latest | Image/frame drawing for eye expressions |
 
 ### System tools
 
@@ -528,6 +607,7 @@ ros2 topic list                              # all active topics
 | Raspberry Pi | — | Runs ROS 2 Humble (Ubuntu 22.04) |
 | Arduino Mega 2560 | `/dev/arduino` (USB serial, 115200) | Motor driver + servo controller |
 | Slamtec RPLiDAR A1 | `/dev/rplidar` (USB serial) | 360° laser scanner |
+| 2× ILI9341 2.4" TFT | SPI0 CE0/CE1 | Eye emotion displays (driven by `eyes_node`) |
 | USB microphone | ALSA default input | Voice command capture |
 | USB / 3.5 mm speaker | ALSA default output | TTS audio playback |
 

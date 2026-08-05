@@ -223,11 +223,12 @@ class VoiceNode(Node):
         self.drive_pwm     = self.declare_parameter('drive_pwm', 20).value
         # ── Robot name (wake-word trigger) — change here to rename the robot ──
         self.robot_name    = self.declare_parameter('robot_name', 'varys').value.lower().strip()
-        voice_topic        = self.declare_parameter('voice_topic', '/robot/voice/command').value
-        body_topic         = self.declare_parameter('body_topic',  '/robot/body/command').value
-        head_topic         = self.declare_parameter('head_topic',  '/robot/head/pose').value
-        hands_topic        = self.declare_parameter('hands_topic', '/robot/hands/pose').value
-        goal_topic         = self.declare_parameter('goal_topic',  '/goal_pose').value
+        voice_topic        = self.declare_parameter('voice_topic',   '/robot/voice/command').value
+        body_topic         = self.declare_parameter('body_topic',   '/robot/body/command').value
+        head_topic         = self.declare_parameter('head_topic',   '/robot/head/pose').value
+        hands_topic        = self.declare_parameter('hands_topic',  '/robot/hands/pose').value
+        goal_topic         = self.declare_parameter('goal_topic',   '/goal_pose').value
+        emotion_topic      = self.declare_parameter('emotion_topic', '/robot/emotion').value
 
         # Room coordinates: start from canonical static rooms (config/rooms.yaml),
         # then overlay any user-saved locations persisted by the web UI / location_manager.
@@ -253,10 +254,11 @@ class VoiceNode(Node):
         self.create_subscription(GoalStatusArray, '/navigate_to_pose/_action/status',
                                  self._on_nav_status, 10)
 
-        self.voice_pub   = self.create_publisher(String,            voice_topic, 10)
-        self.body_pub    = self.create_publisher(String,            body_topic,  10)
-        self.head_pub    = self.create_publisher(Float32MultiArray, head_topic,  10)
-        self.hands_pub   = self.create_publisher(Float32MultiArray, hands_topic, 10)
+        self.voice_pub   = self.create_publisher(String,            voice_topic,   10)
+        self.body_pub    = self.create_publisher(String,            body_topic,    10)
+        self.head_pub    = self.create_publisher(Float32MultiArray, head_topic,    10)
+        self.hands_pub   = self.create_publisher(Float32MultiArray, hands_topic,   10)
+        self.emotion_pub = self.create_publisher(String,            emotion_topic, 10)
 
         # This publishes directly to ROS2 Nav2 stack
         self.goal_pub    = self.create_publisher(PoseStamped,       goal_topic,  10)
@@ -291,6 +293,7 @@ class VoiceNode(Node):
         except Exception as e: self.get_logger().error(f'Microphone error: {e}')
 
         time.sleep(1)
+        self.set_emotion('happy')
         self.speak_async(f'{self.robot_name.capitalize()} online. Navigation and AI systems ready.')
         threading.Thread(target=self.listen_loop, daemon=True).start()
 
@@ -346,6 +349,7 @@ class VoiceNode(Node):
             self.get_logger().debug(f'Ignored (no wake word): "{text}"')
             return
         if not command:
+            self.set_emotion('surprised')
             self.speak_async('Yes?')
             return
         for cmd in self.robot_commands:
@@ -367,34 +371,44 @@ class VoiceNode(Node):
         # ── MOVEMENT (Arduino Expects <LEFT_PWM,RIGHT_PWM>) ──
         elif any(w in text for w in ['go forward','move forward','go ahead']):
             p = self.drive_pwm
+            self.set_emotion('neutral')
             self.speak_async('Moving forward.')
             self.body_cmd(f'<{p},{p}>')
 
         elif any(w in text for w in ['go backward','go back','move back','reverse']):
             p = self.drive_pwm
+            self.set_emotion('neutral')
             self.speak_async('Moving backward.')
             self.body_cmd(f'<{-p},{-p}>')
 
         elif any(w in text for w in ['turn left','rotate left']):
             p = self.drive_pwm
+            self.set_emotion('neutral')
             self.speak_async('Turning left.')
             self.body_cmd(f'<{-p},{p}>')
 
         elif any(w in text for w in ['turn right','rotate right']):
             p = self.drive_pwm
+            self.set_emotion('neutral')
             self.speak_async('Turning right.')
             self.body_cmd(f'<{p},{-p}>')
 
         elif any(w in text for w in ['stop','halt','emergency stop']):
+            self.set_emotion('surprised')
             self.speak_async('Stopped.')
             self.body_cmd('<0,0>')
 
         # ── ANIMATIONS (Arduino Expects <COMMAND>) ──
-        elif 'nod'   in text: self.body_cmd('<NOD>');   self.speak_async('Yes!')
-        elif 'shake' in text: self.body_cmd('<SHAKE>'); self.speak_async('No!')
-        elif 'blink' in text or 'wink' in text: self.body_cmd('<EBLINK>')
-        elif 'wave left'  in text: self.body_cmd('<WAVE:L>'); self.speak_async('Hello!')
-        elif 'wave'       in text: self.body_cmd('<WAVE:R>'); self.speak_async('Hello there!')
+        elif 'nod'   in text:
+            self.set_emotion('happy');   self.body_cmd('<NOD>');   self.speak_async('Yes!')
+        elif 'shake' in text:
+            self.set_emotion('angry');   self.body_cmd('<SHAKE>'); self.speak_async('No!')
+        elif 'blink' in text or 'wink' in text:
+            self.set_emotion('blink')
+        elif 'wave left'  in text:
+            self.set_emotion('happy');   self.body_cmd('<WAVE:L>'); self.speak_async('Hello!')
+        elif 'wave'       in text:
+            self.set_emotion('happy');   self.body_cmd('<WAVE:R>'); self.speak_async('Hello there!')
 
         # ── HEAD LOOK (must precede 'center' so "look center" is not eaten by reset) ──
         elif 'look left'  in text:
@@ -406,11 +420,14 @@ class VoiceNode(Node):
 
         # ── HANDS ──
         elif 'hands up' in text:
+            self.set_emotion('happy')
             self.speak_async('Hands up.'); self.body_cmd('<HANDS:90,90>'); self.publish_hands(90.0, 90.0)
         elif 'hands down' in text:
+            self.set_emotion('neutral')
             self.body_cmd('<HANDS:0,0>'); self.publish_hands(0.0, 0.0)
 
-        elif 'reset' in text or 'center' in text: self.body_cmd('<CENTER>'); self.speak_async('Reset.')
+        elif 'reset' in text or 'center' in text:
+            self.set_emotion('neutral'); self.body_cmd('<CENTER>'); self.speak_async('Reset.')
 
     def handle_room_navigation(self, text):
         triggers = ['go to','navigate to','drive to','take me to']
@@ -428,11 +445,13 @@ class VoiceNode(Node):
 
         if not matched:
             available = ', '.join(self.rooms.keys())
+            self.set_emotion('sad')
             self.speak_async(f'I do not know that location. Available rooms are: {available}.')
             return
 
         x, y, yaw = self.rooms[matched]
         self.get_logger().info(f'Navigating to {matched} ({x}, {y})')
+        self.set_emotion('neutral')
         self.speak_async(f'Navigating to {matched}.')
 
         # Remember destination so _on_nav_status can name it in the outcome message.
@@ -451,15 +470,23 @@ class VoiceNode(Node):
         self.goal_pub.publish(goal)
 
     def handle_ai_question(self, text):
-        self.body_cmd('<EBLINK>')
+        self.set_emotion('surprised')
         def ask_and_speak():
             answer = self.ai.ask(text)
-            self.body_cmd('<NOD>')
+            # Detect AI-unavailable / error responses by checking common phrases
+            _error_phrases = ('unavailable', 'busy right now', 'could not process')
+            if any(p in answer.lower() for p in _error_phrases):
+                self.set_emotion('sad')
+            else:
+                self.set_emotion('happy')
             self.speak(answer)
         threading.Thread(target=ask_and_speak, daemon=True).start()
 
     def body_cmd(self, cmd):
         msg = String(); msg.data = cmd; self.body_pub.publish(msg)
+
+    def set_emotion(self, name):
+        msg = String(); msg.data = name; self.emotion_pub.publish(msg)
 
     # Publish the intended head pose [pan_deg] so other nodes / the web UI can
     # reflect head state (previously this publisher was created but never used).
@@ -509,15 +536,18 @@ class VoiceNode(Node):
         target = self._active_goal or 'the target'
         if status == 4:    # SUCCEEDED
             self.get_logger().info(f'Arrived at {target}.')
+            self.set_emotion('happy')
             self.speak_async(f'I have arrived at {target}.')
             self._active_goal = None
         elif status == 6:  # ABORTED — planner/controller gave up
             self.get_logger().error(
                 f'Could not reach {target}: path blocked or pose unreachable.')
+            self.set_emotion('sad')
             self.speak_async(f'I could not reach {target}. The path may be blocked.')
             self._active_goal = None
         elif status == 5:  # CANCELED
             self.get_logger().warn(f'Navigation to {target} was canceled.')
+            self.set_emotion('neutral')
             self._active_goal = None
 
 
