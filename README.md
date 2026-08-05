@@ -1,6 +1,6 @@
-# OmniServ / "Varys" — Autonomous Reception Robot
+# OmniServ / "Lumi" — Autonomous Reception Robot
 
-A ROS 2 (Humble) workspace for a voice-controlled, LiDAR-based autonomous service robot running on a Raspberry Pi. The robot ("Varys") navigates to named rooms, responds to spoken commands, answers questions via a Gemini LLM, and drives a physical differential-drive base plus animatronic head and arms through an Arduino Mega.
+A ROS 2 (Humble) workspace for a voice-controlled, LiDAR-based autonomous service robot running on a Raspberry Pi. The robot ("Lumi") navigates to named rooms, responds to spoken commands, answers questions via a Gemini LLM, and drives a physical differential-drive base plus animatronic head and arms through an Arduino Mega.
 
 > **New to this project?** Start with [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) to install all dependencies before building.
 >
@@ -16,7 +16,7 @@ A ROS 2 (Humble) workspace for a voice-controlled, LiDAR-based autonomous servic
 2. [Repository Layout](#2-repository-layout)
 3. [The Core Nodes](#3-the-core-nodes)
    - [arduino_bridge](#31-arduino_bridge)
-   - [voice_node (Varys)](#32-voice_node--varys)
+   - [voice_node (Lumi)](#32-voice_node--lumi)
    - [eyes_node](#33-eyes_node)
 4. [Localization, Mapping & Navigation](#4-localization-mapping--navigation)
 5. [Robot Model (URDF)](#5-robot-model-urdf)
@@ -131,7 +131,7 @@ Timed drive pulses the Arduino at **10 Hz** to keep its watchdog alive. On node 
 
 ---
 
-### 3.2 `voice_node` — "Varys"
+### 3.2 `voice_node` — "Lumi"
 
 **File:** `src/omni_base/omni_base/voice_node.py`
 
@@ -193,7 +193,7 @@ Microphone → Google STT → text
 
 **AI integration**
 
-Requires the `GEMINI_API_KEY` environment variable. Uses `google-genai` with a persistent chat session (`gemini-2.5-flash`). System prompt keeps answers ≤ 2 sentences and in-character as "Varys the robot". The node starts and works fully without the key; only open-ended AI questions are degraded.
+Requires the `GEMINI_API_KEY` environment variable. Uses `google-genai` with a persistent chat session (`gemini-2.5-flash`). System prompt keeps answers ≤ 2 sentences and in-character as "Lumi the robot". The node starts and works fully without the key; only open-ended AI questions are degraded.
 
 ---
 
@@ -332,8 +332,8 @@ A standalone browser dashboard that renders the live Nav2 global costmap in real
 **Saved Locations (runtime user-named points):**
 - Click anywhere on the live map → a goal is sent immediately (existing behavior).
 - Enter a short name (e.g. `abc`) in the "Saved Locations" panel and click **Save last click**.
-- The point is persisted by `location_manager` (to `~/.ros/varys_saved_locations.yaml`) and published on the latched `/saved_locations` topic.
-- Both the web UI and the voice node pick up the update. Say **"go to abc"** and Varys will navigate there.
+- The point is persisted by `location_manager` (to `~/.ros/lumi_saved_locations.yaml`) and published on the latched `/saved_locations` topic.
+- Both the web UI and the voice node pick up the update. Say **"go to abc"** and Lumi will navigate there.
 - Each saved entry has a small **×** to delete it. Deletes are also persisted and broadcast.
 
 The "Go To Room" buttons remain the static set from `config/rooms.yaml`. Runtime saves live in a separate list so they don't pollute the canonical rooms.
@@ -482,7 +482,7 @@ Typical full run (navigation + voice + web dashboard):
 ros2 launch omni_base navigation.launch.py use_voice:=true use_web:=true
 ```
 
-When the voice node starts you will hear: **"Varys online. Navigation and AI
+When the voice node starts you will hear: **"Lumi online. Navigation and AI
 systems ready."** The robot is now listening — speak a command.
 
 ### Step 7 — (Optional) Web interface
@@ -620,4 +620,4 @@ ros2 topic list                              # all active topics
 - **Two map files** exist: `omniserv_map.*` at workspace root and `src/omni_base/maps/my_room_map.*` (the one Nav2 loads via `navigation.launch.py`). The root copy is a duplicate and can be removed once confirmed unused.
 - **EKF (`config/ekf.yaml`)** is provided but not launched. Enable it once wheel encoder odometry is wired into the Arduino and publishing on `/wheel/odom`.
 - **Room 4, reception, and lobby** coordinates in `config/rooms.yaml` are rough estimates — measure and update them from the saved map once the environment is finalized. Keep the web UI `ROOMS` list (`web_interface/index.html`) in sync with `config/rooms.yaml`.
-- **Runtime saved locations:** When `use_voice:=true` or `use_web:=true`, `navigation.launch.py` also starts `location_manager`. It merges static rooms with user-saved points from `~/.ros/varys_saved_locations.yaml`, publishes a latched `/saved_locations` (JSON), and accepts `/save_location` (JSON or `name|x|y|yaw`) and `/delete_location` (plain name). The web UI and `voice_node` consume this so "go to <name>" resolves both static rooms and user-saved points (user-saved shadow on name collision). The YAML is the durable store; the topic provides live sync.
+- **Runtime saved locations:** When `use_voice:=true` or `use_web:=true`, `navigation.launch.py` also starts `location_manager`. It merges static rooms with user-saved points from `~/.ros/lumi_saved_locations.yaml`, publishes a latched `/saved_locations` (JSON), and accepts `/save_location` (JSON or `name|x|y|yaw`) and `/delete_location` (plain name). The web UI and `voice_node` consume this so "go to <name>" resolves both static rooms and user-saved points (user-saved shadow on name collision). The YAML is the durable store; the topic provides live sync.

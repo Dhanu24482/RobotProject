@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Eyes Node — Dual ILI9341 TFT emotion display for Varys robot.
+Eyes Node — Dual ILI9341 TFT emotion display for Lumi robot.
 
 Drives two 2.4" ILI9341 320x240 displays connected to the Raspberry Pi's
 hardware SPI0 bus. Subscribes to /robot/emotion (std_msgs/String) and renders
@@ -26,15 +26,19 @@ from rclpy.node import Node
 from std_msgs.msg import String
 
 # ── Hardware imports (Pi-only) ────────────────────────────────────────────────
+import os as _os
+_os.environ.setdefault('BLINKA_RASPBERRY_PI', '1')  # needed on Ubuntu Pi (not Raspberry Pi OS)
+
 _HW_AVAILABLE = False
+_HW_IMPORT_ERROR = None
 try:
     import board
     import digitalio
     import adafruit_rgb_display.ili9341 as ili9341
     from PIL import Image, ImageDraw
     _HW_AVAILABLE = True
-except Exception:
-    pass  # headless mode; warning logged in __init__
+except Exception as _e:
+    _HW_IMPORT_ERROR = str(_e)  # captured for logging in __init__
 
 # ── Constants (from PDF final code) ──────────────────────────────────────────
 BAUDRATE  = 64000000
@@ -64,7 +68,7 @@ class EyesNode(Node):
             self._init_displays()
         else:
             self.get_logger().warn(
-                'eyes_node: hardware libraries unavailable (not a Pi or SPI disabled). '
+                f'eyes_node: hardware libraries unavailable — {_HW_IMPORT_ERROR}. '
                 'Running headless — emotions will be logged only.'
             )
 
@@ -111,6 +115,8 @@ class EyesNode(Node):
     # ── Render dispatcher ─────────────────────────────────────────────────────
 
     def _render(self, name: str):
+        if not self._hw:
+            return  # headless mode — no display hardware available
         dispatch = {
             'surprised': self._draw_surprised,
             'happy':     self._draw_happy,

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Varys Voice Node — Nav2 Goal + Arduino Mega Sync
+Lumi Voice Node — Nav2 Goal + Arduino Mega Sync
 TTS Priority: gTTS → Engineered Local Male Fallback
 """
 import rclpy
@@ -126,9 +126,9 @@ class TTSEngine:
 # ════════════════════════════════════════════════════════════
 class AIClient:
     SYSTEM_INSTRUCTION = (
-        "You are Varys, an advanced humanoid reception robot. "
+        "You are Lumi, an advanced humanoid reception robot. "
         "Keep answers SHORT — maximum 2 sentences. "
-        "Never say you are an AI. You ARE Varys the robot."
+        "Never say you are an AI. You ARE Lumi the robot."
     )
     # How long to skip a key after it hits a rate/quota limit.
     KEY_COOLDOWN_SEC = 60.0
@@ -218,11 +218,11 @@ class VoiceNode(Node):
         self.rooms_file    = self.declare_parameter('rooms_file', default_rooms).value
         self.saved_locations_file = self.declare_parameter(
             'saved_locations_file',
-            os.path.join(os.path.expanduser('~'), '.ros', 'varys_saved_locations.yaml')
+            os.path.join(os.path.expanduser('~'), '.ros', 'lumi_saved_locations.yaml')
         ).value
         self.drive_pwm     = self.declare_parameter('drive_pwm', 20).value
         # ── Robot name (wake-word trigger) — change here to rename the robot ──
-        self.robot_name    = self.declare_parameter('robot_name', 'varys').value.lower().strip()
+        self.robot_name    = self.declare_parameter('robot_name', 'lumi').value.lower().strip()
         voice_topic        = self.declare_parameter('voice_topic',   '/robot/voice/command').value
         body_topic         = self.declare_parameter('body_topic',   '/robot/body/command').value
         head_topic         = self.declare_parameter('head_topic',   '/robot/head/pose').value
@@ -327,8 +327,8 @@ class VoiceNode(Node):
         """Return the command after the robot name, or None if not addressed to the robot.
 
         Requires the name to appear at the start of the utterance and at a word
-        boundary so that a name like "varys" does not trigger on "varysian".
-        Any leading punctuation or whitespace (e.g. the comma in "varys, go to
+        boundary so that a name like "lumi" does not trigger on "lumiian".
+        Any leading punctuation or whitespace (e.g. the comma in "lumi, go to
         office") is stripped from the remainder.
 
         Returns:

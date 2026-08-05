@@ -3,7 +3,7 @@
 Location Manager — runtime user-saved named locations (waypoints).
 
 - Loads the static rooms from config/rooms.yaml (installed).
-- Loads/ persists user-defined locations to a writable YAML (default ~/.ros/varys_saved_locations.yaml).
+- Loads/ persists user-defined locations to a writable YAML (default ~/.ros/lumi_saved_locations.yaml).
 - Publishes a latched /saved_locations (std_msgs/String JSON) with the merged set.
 - Accepts /save_location and /delete_location (std_msgs/String) from web UI or other nodes.
 - Voice node subscribes to stay in sync for "go to <name>" commands.
@@ -76,7 +76,7 @@ class LocationManager(Node):
             get_package_share_directory('omni_base'), 'config', 'rooms.yaml')
         self.rooms_file = self.declare_parameter('rooms_file', default_rooms).value
 
-        default_saved = os.path.join(os.path.expanduser('~'), '.ros', 'varys_saved_locations.yaml')
+        default_saved = os.path.join(os.path.expanduser('~'), '.ros', 'lumi_saved_locations.yaml')
         self.saved_file = self.declare_parameter('saved_locations_file', default_saved).value
 
         # ── Load sources ──

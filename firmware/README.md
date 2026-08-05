@@ -1,6 +1,6 @@
 # OmniServ Firmware
 
-Arduino Mega 2560 firmware for the OmniServ / Varys robot. Handles motor control
+Arduino Mega 2560 firmware for the OmniServ / Lumi robot. Handles motor control
 (BTS7960 dual driver), animatronic servos, the HC-05 Bluetooth remote, and — as of
 the sensor upgrade — 6 ultrasonic + 4 IR pit sensors streamed to the Raspberry Pi.
 

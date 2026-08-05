@@ -1,7 +1,7 @@
 # Sensor Upgrade & Improvements — Status Document
 
 This document records the software, firmware, and configuration changes made to
-prepare OmniServ / Varys for ultrasonic + IR pit sensing, plus several related
+prepare OmniServ / Lumi for ultrasonic + IR pit sensing, plus several related
 improvements (on-Pi Arduino flashing, Gemini key rotation, web UI).
 
 > IMPORTANT — current status: **The new sensors are NOT physically installed yet.**

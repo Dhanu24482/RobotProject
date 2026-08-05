@@ -3,7 +3,7 @@
 <package format="3">
   <name>omni_base</name>
   <version>0.1.0</version>
-  <description>OmniServ / Varys autonomous reception robot: Arduino bridge, voice control, and bringup launch files.</description>
+  <description>OmniServ / Lumi autonomous reception robot: Arduino bridge, voice control, and bringup launch files.</description>
   <maintainer email="dilshandhanushka836@gmail.com">dhanuhka</maintainer>
   <license>MIT</license>
 

@@ -1,6 +1,6 @@
 # Environment Setup Guide
 
-Complete step-by-step guide to set up a fresh Raspberry Pi for the OmniServ / Varys robot from scratch.
+Complete step-by-step guide to set up a fresh Raspberry Pi for the OmniServ / Lumi robot from scratch.
 
 **Target platform:** Raspberry Pi 4 (or 5) · Ubuntu 22.04 LTS (64-bit) · ROS 2 Humble
 
@@ -229,7 +229,7 @@ sudo apt install -y espeak espeak-ng
 
 ```bash
 # Test pico2wave → sox → aplay pipeline
-pico2wave -l=en-GB -w=/tmp/test.wav "Hello, I am Varys." && aplay /tmp/test.wav
+pico2wave -l=en-GB -w=/tmp/test.wav "Hello, I am Lumi." && aplay /tmp/test.wav
 
 # Test espeak fallback
 espeak -v en+m3 "Hello from espeak"
@@ -542,7 +542,7 @@ ros2 topic pub --once /robot/body/command std_msgs/String "{data: 'STOP'}"
 
 ```bash
 ros2 run omni_base voice_node
-# You should hear: "Varys online. Navigation and AI systems ready."
+# You should hear: "Lumi online. Navigation and AI systems ready."
 # Press Ctrl+C to stop
 ```
 

@@ -23,7 +23,7 @@ setup(
     zip_safe=True,
     maintainer='dhanuhka',
     maintainer_email='dilshandhanushka836@gmail.com',
-    description='OmniServ / Varys autonomous reception robot: Arduino bridge, voice control, and bringup launch files.',
+    description='OmniServ / Lumi autonomous reception robot: Arduino bridge, voice control, and bringup launch files.',
     license='MIT',
     extras_require={
         'test': [
