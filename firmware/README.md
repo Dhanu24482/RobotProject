@@ -27,8 +27,16 @@ Sketch: [`omniserv_firmware/omniserv_firmware.ino`](omniserv_firmware/omniserv_f
 | Eye left | 3 |
 | Eye right | 12 |
 | Eye lid | 13 |
-| Hand left | 44 |
-| Hand right | 45 |
+| Left shoulder pitch | 38 |
+| Left shoulder roll | 39 |
+| Left elbow | 40 |
+| Right shoulder pitch | 41 |
+| Right shoulder roll | 42 |
+| Right elbow | 43 |
+
+> Pins 38–43 avoid the BTS7960 motor pins (4–11). If you validated 6-DOF poses on a
+> standalone Mega using `{2,8,4,5,6,7}`, rewire the arms to 38–43 before flashing
+> OmniServ (or change `ARM_PINS` in the sketch).
 
 ### Lights & horn
 
@@ -73,12 +81,15 @@ Two links: `Serial` (USB, 115200) to the Pi/ROS2, and `Serial3` (9600) to the HC
 |---------|---------|
 | `<L,R>` | Motor PWM, e.g. `<100,80>` (-255..255 each) |
 | `<NOD>` `<SHAKE>` `<EBLINK>` `<CENTER>` | Animations |
-| `<WAVE:L>` `<WAVE:R>` | Wave a hand |
+| `<WAVE:L>` `<WAVE:R>` | Wave a hand (6-DOF arm animation) |
+| `<HOME>` `<HAND_UP>` `<HAND_DOWN>` | Arm poses (synchronized) |
+| `<PULL_UP>` `<PULL_DOWN>` `<SALUTE>` | Arm poses |
+| `<GOODBYE>` | Salute, hold ~2.5 s, return home |
 | `<HP:90>` | Head pan angle |
 | `<EL:80>` `<ER:100>` `<EY:x,y>` | Eye servos |
-| `<HL:90>` `<HR:90>` `<HANDS:l,r>` | Hand servos |
-| `<LOOK:L>` `<LOOK:R>` `<LOOK:C>` | Look left / right / center (sensor upgrade) |
-| `<EBLINK2>` | Double blink (sensor upgrade) |
+| `<HL:90>` `<HR:90>` `<HANDS:l,r>` | Compat: map to shoulder pitch |
+| `<LOOK:L>` `<LOOK:R>` `<LOOK:C>` | Look left / right / center |
+| `<EBLINK2>` | Double blink |
 
 ### Arduino -> Pi (telemetry, added in the sensor upgrade)
 

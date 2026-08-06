@@ -2,13 +2,19 @@
   OmniServ Robot - Full Control
   Hardware : Arduino Mega 2560
   Motors   : BTS7960 Dual Driver (ROS2 Nav2 + Bluetooth App)
-  Servos   : Head Pan (left/right), Eye Left, Eye Right, Eye Lid, Hand Left, Hand Right
+  Servos   : Head Pan, Eyes, Eyelid + 6-DOF humanoid arms
   Comms    : Serial  (USB) → Raspberry Pi / ROS2
              Serial3 (BT)  → HC-05 Bluetooth App
 
   Motor Command  (from Pi):  <left_pwm,right_pwm>     e.g. <100,80>
-  Servo Commands (from Pi):  <HP:90>  <EL:80>  <EY:10,-5>  <HL:90>  <NOD>  etc.
+  Servo Commands (from Pi):  <HP:90>  <EL:80>  <EY:10,-5>  <NOD>  <SALUTE>  etc.
+  Arm poses                :  <HOME> <HAND_UP> <HAND_DOWN> <PULL_UP> <PULL_DOWN>
+                              <SALUTE> <GOODBYE>
   Bluetooth      (from App): W F A D S 0-9 k B b M m  (unchanged)
+
+  Arm pins 38-43 are free of motor/sensor conflicts. If you validated poses on a
+  standalone Mega with pins {2,8,4,5,6,7}, rewire arms here before flashing OmniServ
+  (those pins are used by head pan + BTS7960).
 ============================================================================================*/
 
 #include <Servo.h>
@@ -38,8 +44,11 @@
 #define PIN_EYE_LEFT   3
 #define PIN_EYE_RIGHT  12
 #define PIN_EYE_LID    13
-#define PIN_HAND_LEFT  44
-#define PIN_HAND_RIGHT 45
+
+// 6-DOF arms (robot angles; reverse flags applied in getServoAngle)
+// Order: L shoulder pitch, L shoulder roll, L elbow,
+//        R shoulder pitch, R shoulder roll, R elbow
+const byte ARM_PINS[6] = {38, 39, 40, 41, 42, 43};
 
 // ─── SENSOR PINS (sensor upgrade — telemetry only, never stops the bot) ─────
 // 6x HC-SR04 ultrasonic: 3 front (~120 deg spread) + 3 rear (for reversing).
@@ -64,7 +73,7 @@ const unsigned long TELEMETRY_PERIOD_MS = 100;  // ~10 Hz
 // ─── SERVO OBJECTS ────────────────────────────────────────────────────────
 Servo headPan;
 Servo eyeLeft, eyeRight, eyeLid;
-Servo handLeft, handRight;
+Servo armServos[6];
 
 // ─── SERVO DEFAULT POSITIONS ──────────────────────────────────────────────
 const int HP_CENTER   = 90;   // Head center
@@ -78,9 +87,22 @@ const int EYE_MAX     = 130;
 const int EYE_OPEN    = 30;   // Eyelid open position
 const int EYE_CLOSED  = 90;   // Eyelid closed position
 
-const int HAND_DOWN   = 0;
-const int HAND_UP     = 90;
-const int HAND_MAX    = 150;
+// Calibrated robot-space arm angles (HOME)
+int currentArmAngle[6] = {0, 90, 90, 0, 90, 90};
+
+// Mirror left-side mechanical mounting
+bool reverseArmServo[6] = {true, true, true, false, false, false};
+
+const int ARM_SPEED_DELAY_MS = 40;   // ms per degree step (smooth parallel move)
+const int GOODBYE_HOLD_MS    = 2500; // hold salute before returning home
+
+// Named poses (robot angles)
+int POSE_HOME[6]      = {0, 90, 90, 0, 90, 90};
+int POSE_HAND_UP[6]   = {180, 90, 90, 180, 90, 90};
+int POSE_HAND_DOWN[6] = {0, 90, 90, 0, 90, 90};
+int POSE_PULL_UP[6]   = {0, 0, 180, 0, 0, 180};
+int POSE_PULL_DOWN[6] = {0, 180, 0, 0, 180, 0};
+int POSE_SALUTE[6]    = {0, 90, 90, 180, 60, 150};  // right hand salute
 
 // ─── BLUETOOTH STATE ──────────────────────────────────────────────────────
 int  command;
@@ -135,10 +157,12 @@ void setup() {
   eyeLeft.attach(PIN_EYE_LEFT);
   eyeRight.attach(PIN_EYE_RIGHT);
   eyeLid.attach(PIN_EYE_LID);
-  handLeft.attach(PIN_HAND_LEFT);
-  handRight.attach(PIN_HAND_RIGHT);
+  for (int i = 0; i < 6; i++) {
+    armServos[i].attach(ARM_PINS[i]);
+    armServos[i].write(getArmServoAngle(i, currentArmAngle[i]));
+  }
 
-  // Servo startup positions
+  // Servo startup positions (head/eyes + arm HOME already written above)
   centerAll();
 
   // Serial ports
@@ -278,6 +302,15 @@ void parseSerialCommand(String cmd) {
   // ── WAVE RIGHT: <WAVE:R> ──
   if (inner == "WAVE:R") { doWave(false); return; }
 
+  // ── 6-DOF ARM POSES ──
+  if (inner == "HOME" || inner == "ARM_HOME") { moveArmPose(POSE_HOME); return; }
+  if (inner == "HAND_UP")   { moveArmPose(POSE_HAND_UP); return; }
+  if (inner == "HAND_DOWN") { moveArmPose(POSE_HAND_DOWN); return; }
+  if (inner == "PULL_UP")   { moveArmPose(POSE_PULL_UP); return; }
+  if (inner == "PULL_DOWN") { moveArmPose(POSE_PULL_DOWN); return; }
+  if (inner == "SALUTE")    { moveArmPose(POSE_SALUTE); return; }
+  if (inner == "GOODBYE")   { doGoodbye(); return; }
+
   // ── LOOK: <LOOK:L> <LOOK:R> <LOOK:C> ──
   if (inner == "LOOK:L") { lookLeft();  return; }
   if (inner == "LOOK:R") { lookRight(); return; }
@@ -320,29 +353,38 @@ void parseSerialCommand(String cmd) {
     return;
   }
 
-  // ── HAND LEFT: <HL:90> ──
+  // ── HAND LEFT (compat): <HL:90> → left shoulder pitch ──
   if (inner.startsWith("HL:")) {
-    int v = inner.substring(3).toInt();
-    handLeft.write(constrain(v, HAND_DOWN, HAND_MAX));
+    int v = constrain(inner.substring(3).toInt(), 0, 180);
+    int pose[6];
+    copyArmPose(currentArmAngle, pose);
+    pose[0] = v;
+    moveArmPose(pose);
     return;
   }
 
-  // ── HAND RIGHT: <HR:90> ──
+  // ── HAND RIGHT (compat): <HR:90> → right shoulder pitch ──
   if (inner.startsWith("HR:")) {
-    int v = inner.substring(3).toInt();
-    handRight.write(constrain(v, HAND_DOWN, HAND_MAX));
+    int v = constrain(inner.substring(3).toInt(), 0, 180);
+    int pose[6];
+    copyArmPose(currentArmAngle, pose);
+    pose[3] = v;
+    moveArmPose(pose);
     return;
   }
 
-  // ── BOTH HANDS: <HANDS:left,right> ──
+  // ── BOTH HANDS (compat): <HANDS:left,right> → both shoulder pitches ──
   if (inner.startsWith("HANDS:")) {
     String vals = inner.substring(6);
     int comma = vals.indexOf(',');
     if (comma != -1) {
-      int l = vals.substring(0, comma).toInt();
-      int r = vals.substring(comma + 1).toInt();
-      handLeft.write(constrain(l, HAND_DOWN, HAND_MAX));
-      handRight.write(constrain(r, HAND_DOWN, HAND_MAX));
+      int l = constrain(vals.substring(0, comma).toInt(), 0, 180);
+      int r = constrain(vals.substring(comma + 1).toInt(), 0, 180);
+      int pose[6];
+      copyArmPose(currentArmAngle, pose);
+      pose[0] = l;
+      pose[3] = r;
+      moveArmPose(pose);
     }
     return;
   }
@@ -394,6 +436,41 @@ void smoothWrite(Servo& s, int target, int stepDelay = 8) {
 
 
 // ═══════════════════════════════════════════════════════════════════════════
+//  6-DOF ARM CONTROL (synchronized poses)
+// ═══════════════════════════════════════════════════════════════════════════
+int getArmServoAngle(int index, int angle) {
+  if (reverseArmServo[index]) return 180 - angle;
+  return angle;
+}
+
+void copyArmPose(const int src[6], int dst[6]) {
+  for (int i = 0; i < 6; i++) dst[i] = src[i];
+}
+
+void moveArmPose(int targetPose[6]) {
+  bool moving = true;
+  while (moving) {
+    moving = false;
+    for (int i = 0; i < 6; i++) {
+      if (currentArmAngle[i] != targetPose[i]) {
+        moving = true;
+        if (currentArmAngle[i] < targetPose[i]) currentArmAngle[i]++;
+        else currentArmAngle[i]--;
+        armServos[i].write(getArmServoAngle(i, currentArmAngle[i]));
+      }
+    }
+    delay(ARM_SPEED_DELAY_MS);
+  }
+}
+
+void doGoodbye() {
+  moveArmPose(POSE_SALUTE);
+  delay(GOODBYE_HOLD_MS);
+  moveArmPose(POSE_HOME);
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
 //  SERVO ANIMATIONS
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -403,8 +480,7 @@ void centerAll() {
   eyeLeft.write(EYE_CENTER);
   eyeRight.write(EYE_CENTER);
   eyeLid.write(EYE_OPEN);
-  handLeft.write(HAND_DOWN);
-  handRight.write(HAND_DOWN);
+  moveArmPose(POSE_HOME);
 }
 
 // Nod: head turns left → right → left → center (since no tilt, we simulate with pan)
@@ -446,16 +522,25 @@ void doDoubleBlink() {
   doBlink(); delay(200); doBlink();
 }
 
-// Wave hand (left = true, right = false)
+// Wave: raise one arm, nudge elbow, return home
 void doWave(bool left) {
-  Servo& hand = left ? handLeft : handRight;
-  for (int i = 0; i < 3; i++) {
-    smoothWrite(hand, HAND_MAX - 30, 10);
-    delay(200);
-    smoothWrite(hand, HAND_UP - 20, 10);
-    delay(200);
+  int pose[6];
+  copyArmPose(POSE_HOME, pose);
+  if (left) {
+    pose[0] = 150;
+    pose[2] = 120;
+  } else {
+    pose[3] = 150;
+    pose[5] = 120;
   }
-  smoothWrite(hand, HAND_DOWN, 10);
+  moveArmPose(pose);
+  for (int i = 0; i < 3; i++) {
+    if (left) pose[2] = (i % 2 == 0) ? 150 : 90;
+    else      pose[5] = (i % 2 == 0) ? 150 : 90;
+    moveArmPose(pose);
+    delay(100);
+  }
+  moveArmPose(POSE_HOME);
 }
 
 // Look left

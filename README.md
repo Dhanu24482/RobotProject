@@ -125,6 +125,7 @@ right_pwm = linear_x + angular_z × (wheel_separation / 2)
 | Drive shortcut | `FORWARD`, `BACKWARD`, `LEFT`, `RIGHT` | Timed drive (2–2.5 s) in background thread |
 | Stop | `STOP` | Sends `<0,0>` immediately |
 | Servo / animation | `NOD`, `SHAKE`, `EBLINK`, `CENTER`, `WAVE:L`, `WAVE:R` | Forwarded as `<CMD>` |
+| Arm poses | `HOME`, `HAND_UP`, `HAND_DOWN`, `PULL_UP`, `PULL_DOWN`, `SALUTE`, `GOODBYE` | Forwarded as `<CMD>` |
 | Servo pose prefix | `HP:`, `EL:`, `ER:`, `EY:`, `HL:`, `HR:`, `HANDS:` | Forwarded as `<CMD>` |
 
 Timed drive pulses the Arduino at **10 Hz** to keep its watchdog alive. On node shutdown, `<0,0>` is always sent to stop the motors.
@@ -169,7 +170,7 @@ Microphone → Google STT → text
 | Navigation | "go to room 1", "navigate to reception", "take me to lobby", "go home", "go to abc" (user-saved via web UI) |
 | Movement | "go forward", "move back", "turn left", "turn right", "stop" |
 | Head / body | "look left", "look right", "look forward", "nod", "shake", "blink", "wink" |
-| Arms | "wave", "wave left", "wave right", "hands up", "hands down" |
+| Arms | "wave", "wave left", "hands up", "hands down", "salute", "goodbye" / "bye", "pull up", "pull down" |
 | Reset | "reset", "center" |
 | AI question | anything else → answered by Gemini |
 

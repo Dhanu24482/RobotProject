@@ -285,7 +285,9 @@ class VoiceNode(Node):
             'go forward', 'move forward', 'go ahead', 'go backward', 'go back', 'move back', 'reverse',
             'turn left', 'rotate left', 'turn right', 'rotate right', 'stop', 'halt', 'emergency stop',
             'look left', 'look right', 'look forward', 'look center', 'nod', 'shake', 'blink', 'wink',
-            'wave', 'wave left', 'wave right', 'hands up', 'hands down', 'reset', 'center'
+            'wave', 'wave left', 'wave right', 'hands up', 'hands down',
+            'salute', 'goodbye', 'good bye', 'bye', 'see you',
+            'pull up', 'pull down', 'reset', 'center'
         ]
 
         try:
@@ -419,13 +421,35 @@ class VoiceNode(Node):
         elif 'look forward' in text or 'look center' in text:
             self.body_cmd('<LOOK:C>'); self.publish_head(90.0)
 
-        # ── HANDS ──
+        # ── ARMS / HANDS (6-DOF poses on Mega) ──
+        # Goodbye / bye before generic greetings so "see you" is not missed.
+        elif any(w in text for w in ['goodbye', 'good bye', 'see you', 'bye']):
+            self.set_emotion('happy')
+            self.speak_async('Goodbye! Have a nice day.')
+            self.body_cmd('<GOODBYE>')  # salute → hold → home on Arduino
+        elif 'salute' in text:
+            self.set_emotion('happy')
+            self.speak_async('Salute!')
+            self.body_cmd('<SALUTE>')
+            self.publish_hands(90.0, 180.0)
+        elif 'pull up' in text:
+            self.set_emotion('happy')
+            self.speak_async('Pulling up.')
+            self.body_cmd('<PULL_UP>')
+        elif 'pull down' in text:
+            self.set_emotion('neutral')
+            self.speak_async('Pulling down.')
+            self.body_cmd('<PULL_DOWN>')
         elif 'hands up' in text:
             self.set_emotion('happy')
-            self.speak_async('Hands up.'); self.body_cmd('<HANDS:90,90>'); self.publish_hands(90.0, 90.0)
+            self.speak_async('Hands up.')
+            self.body_cmd('<HAND_UP>')
+            self.publish_hands(180.0, 180.0)
         elif 'hands down' in text:
             self.set_emotion('neutral')
-            self.body_cmd('<HANDS:0,0>'); self.publish_hands(0.0, 0.0)
+            self.speak_async('Hands down.')
+            self.body_cmd('<HAND_DOWN>')
+            self.publish_hands(0.0, 0.0)
 
         elif 'reset' in text or 'center' in text:
             self.set_emotion('neutral'); self.body_cmd('<CENTER>'); self.speak_async('Reset.')
