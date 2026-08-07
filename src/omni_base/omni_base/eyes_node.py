@@ -91,16 +91,28 @@ class EyesNode(Node):
             cs_left  = digitalio.DigitalInOut(board.D5)    # GPIO 5, Pin 29
             cs_right = digitalio.DigitalInOut(board.D6)    # GPIO 6, Pin 31
             dc       = digitalio.DigitalInOut(board.D24)
-            reset    = digitalio.DigitalInOut(board.D25)
             spi      = board.SPI()
+
+            # RESET is shared by both panels, so it is pulsed once here and the
+            # drivers are built with rst=None. Handing the same reset pin to both
+            # constructors would let the second one reset the already-configured
+            # first panel, leaving that eye blank.
+            self._reset = digitalio.DigitalInOut(board.D25)
+            self._reset.direction = digitalio.Direction.OUTPUT
+            self._reset.value = True
+            time.sleep(0.05)
+            self._reset.value = False
+            time.sleep(0.05)
+            self._reset.value = True
+            time.sleep(0.15)
 
             self._left_eye = ili9341.ILI9341(
                 spi, rotation=self._rotation,
-                cs=cs_left, dc=dc, rst=reset, baudrate=self._baudrate
+                cs=cs_left, dc=dc, rst=None, baudrate=self._baudrate
             )
             self._right_eye = ili9341.ILI9341(
                 spi, rotation=self._rotation,
-                cs=cs_right, dc=dc, rst=reset, baudrate=self._baudrate
+                cs=cs_right, dc=dc, rst=None, baudrate=self._baudrate
             )
             self._hw = True
             self.get_logger().info('eyes_node: ILI9341 displays initialized.')
