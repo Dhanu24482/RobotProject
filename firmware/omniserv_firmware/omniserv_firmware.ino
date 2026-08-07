@@ -2,7 +2,7 @@
   OmniServ Robot - Full Control
   Hardware : Arduino Mega 2560
   Motors   : BTS7960 Dual Driver (ROS2 Nav2 + Bluetooth App)
-  Servos   : Head Pan, Eyes, Eyelid + 6-DOF humanoid arms
+  Servos   : Head Pan, Eyes, Eyelid + 8-DOF humanoid arms (shoulder, elbow, palm)
   Comms    : Serial  (USB) → Raspberry Pi / ROS2
              Serial3 (BT)  → HC-05 Bluetooth App
 
@@ -10,11 +10,17 @@
   Servo Commands (from Pi):  <HP:90>  <EL:80>  <EY:10,-5>  <NOD>  <SALUTE>  etc.
   Arm poses                :  <HOME> <HAND_UP> <HAND_DOWN> <PULL_UP> <PULL_DOWN>
                               <SALUTE> <GOODBYE>
+  Palms / wrists           :  <PL:120> <PR:120> <PALMS:l,r> <PALM:OPEN> <PALM:CLOSE>
   Bluetooth      (from App): W F A D S 0-9 k B b M m  (unchanged)
 
-  Arm pins 38-43 are free of motor/sensor conflicts. If you validated poses on a
+  Arm pins 38-45 are free of motor/sensor conflicts. If you validated poses on a
   standalone Mega with pins {2,8,4,5,6,7}, rewire arms here before flashing OmniServ
   (those pins are used by head pan + BTS7960).
+
+  SERVO BUDGET — 4 head/eye + 8 arm = 12, which is exactly what one AVR timer can
+  drive. The Servo library fills Timer5 first (12 servos), then Timer1, and Timer1
+  is what generates analogWrite() on pin 11 = LPWM_2 = left motor reverse. A 13th
+  servo would silently kill reverse on the left wheel; move LPWM_2 to pin 9 first.
 ============================================================================================*/
 
 #include <Servo.h>
@@ -45,10 +51,18 @@
 #define PIN_EYE_RIGHT  12
 #define PIN_EYE_LID    13
 
-// 6-DOF arms (robot angles; reverse flags applied in getServoAngle)
-// Order: L shoulder pitch, L shoulder roll, L elbow,
-//        R shoulder pitch, R shoulder roll, R elbow
-const byte ARM_PINS[6] = {38, 39, 40, 41, 42, 43};
+// 8-DOF arms (robot angles; reverse flags applied in getArmServoAngle).
+// The palms are appended after the original six joints rather than interleaved,
+// so every stored pose index and the HL:/HR:/HANDS: compat commands keep
+// addressing the same joint they always did.
+#define NUM_ARM 8
+const byte ARM_PINS[NUM_ARM] = {38, 39, 40, 41, 42, 43, 44, 45};
+
+enum ArmJoint {
+  L_SHOULDER_PITCH = 0, L_SHOULDER_ROLL, L_ELBOW,
+  R_SHOULDER_PITCH,     R_SHOULDER_ROLL, R_ELBOW,
+  L_PALM,               R_PALM
+};
 
 // ─── SENSOR PINS (sensor upgrade — telemetry only, never stops the bot) ─────
 // 6x HC-SR04 ultrasonic: 3 front (~120 deg spread) + 3 rear (for reversing).
@@ -73,7 +87,7 @@ const unsigned long TELEMETRY_PERIOD_MS = 100;  // ~10 Hz
 // ─── SERVO OBJECTS ────────────────────────────────────────────────────────
 Servo headPan;
 Servo eyeLeft, eyeRight, eyeLid;
-Servo armServos[6];
+Servo armServos[NUM_ARM];
 
 // ─── SERVO DEFAULT POSITIONS ──────────────────────────────────────────────
 const int HP_CENTER   = 90;   // Head center
@@ -87,22 +101,44 @@ const int EYE_MAX     = 130;
 const int EYE_OPEN    = 30;   // Eyelid open position
 const int EYE_CLOSED  = 90;   // Eyelid closed position
 
+// Palm / wrist servos. 90 is flat neutral, and the left flag below mirrors the
+// mounting, so one number means the same gesture on both hands.
+const int PALM_NEUTRAL = 90;
+const int PALM_OPEN    = 150;
+const int PALM_CLOSED  = 30;
+const int PALM_SALUTE  = 135;  // wrist flexed toward the brow
+const int PALM_MIN     = 0;
+const int PALM_MAX     = 180;
+
 // Calibrated robot-space arm angles (HOME)
-int currentArmAngle[6] = {0, 90, 90, 0, 90, 90};
+int currentArmAngle[NUM_ARM] = {0, 90, 90, 0, 90, 90, PALM_NEUTRAL, PALM_NEUTRAL};
 
 // Mirror left-side mechanical mounting
-bool reverseArmServo[6] = {true, true, true, false, false, false};
+bool reverseArmServo[NUM_ARM] = {true, true, true, false, false, false, true, false};
 
-const int ARM_SPEED_DELAY_MS = 40;   // ms per degree step (smooth parallel move)
-const int GOODBYE_HOLD_MS    = 2500; // hold salute before returning home
+const int ARM_SPEED_DELAY_MS  = 40;  // ms per degree step (smooth parallel move)
+const int PALM_STEP_DELAY_MS  = 6;   // wrists are light; the arm cadence makes a
+                                     // 70 deg flick take ~3 s, far too slow to read
+                                     // as a wave
+const int GOODBYE_HOLD_MS     = 900; // pause on the salute; the wave fills the rest
 
 // Named poses (robot angles)
-int POSE_HOME[6]      = {0, 90, 90, 0, 90, 90};
-int POSE_HAND_UP[6]   = {180, 90, 90, 180, 90, 90};
-int POSE_HAND_DOWN[6] = {0, 90, 90, 0, 90, 90};
-int POSE_PULL_UP[6]   = {0, 0, 180, 0, 0, 180};
-int POSE_PULL_DOWN[6] = {0, 180, 0, 0, 180, 0};
-int POSE_SALUTE[6]    = {0, 90, 90, 180, 60, 150};  // right hand salute
+int POSE_HOME[NUM_ARM]      = {0, 90, 90, 0, 90, 90, PALM_NEUTRAL, PALM_NEUTRAL};
+int POSE_HAND_UP[NUM_ARM]   = {180, 90, 90, 180, 90, 90, PALM_OPEN, PALM_OPEN};
+int POSE_HAND_DOWN[NUM_ARM] = {0, 90, 90, 0, 90, 90, PALM_NEUTRAL, PALM_NEUTRAL};
+int POSE_PULL_UP[NUM_ARM]   = {0, 0, 180, 0, 0, 180, PALM_CLOSED, PALM_CLOSED};
+int POSE_PULL_DOWN[NUM_ARM] = {0, 180, 0, 0, 180, 0, PALM_CLOSED, PALM_CLOSED};
+int POSE_SALUTE[NUM_ARM]    = {0, 90, 90, 180, 60, 150, PALM_NEUTRAL, PALM_SALUTE};
+
+// Wave geometry: the shoulder lifts the arm, the elbow holds the forearm up, and
+// only the wrist oscillates. The previous version swept the elbow, which flapped
+// the whole forearm instead of reading as a hand wave.
+const int  WAVE_SHOULDER = 150;
+const int  WAVE_ELBOW    = 120;
+const int  WAVE_PALM_IN  = 50;
+const int  WAVE_PALM_OUT = 130;
+const byte WAVE_CYCLES   = 3;
+const byte GOODBYE_WAVES = 2;
 
 // ─── BLUETOOTH STATE ──────────────────────────────────────────────────────
 int  command;
@@ -157,7 +193,7 @@ void setup() {
   eyeLeft.attach(PIN_EYE_LEFT);
   eyeRight.attach(PIN_EYE_RIGHT);
   eyeLid.attach(PIN_EYE_LID);
-  for (int i = 0; i < 6; i++) {
+  for (int i = 0; i < NUM_ARM; i++) {
     armServos[i].attach(ARM_PINS[i]);
     armServos[i].write(getArmServoAngle(i, currentArmAngle[i]));
   }
@@ -223,6 +259,8 @@ void loop() {
       case 'v': doWave(false);   break;  // Wave right
       case 'K': doBlink();       break;  // Blink eyes
       case 'C': centerAll();     break;  // Center everything
+      case 'G': setPalms(PALM_OPEN,   PALM_OPEN);   break;  // Open palms
+      case 'g': setPalms(PALM_CLOSED, PALM_CLOSED); break;  // Close palms
 
       default: stopRobot(); break;
     }
@@ -356,9 +394,9 @@ void parseSerialCommand(String cmd) {
   // ── HAND LEFT (compat): <HL:90> → left shoulder pitch ──
   if (inner.startsWith("HL:")) {
     int v = constrain(inner.substring(3).toInt(), 0, 180);
-    int pose[6];
+    int pose[NUM_ARM];
     copyArmPose(currentArmAngle, pose);
-    pose[0] = v;
+    pose[L_SHOULDER_PITCH] = v;
     moveArmPose(pose);
     return;
   }
@@ -366,9 +404,9 @@ void parseSerialCommand(String cmd) {
   // ── HAND RIGHT (compat): <HR:90> → right shoulder pitch ──
   if (inner.startsWith("HR:")) {
     int v = constrain(inner.substring(3).toInt(), 0, 180);
-    int pose[6];
+    int pose[NUM_ARM];
     copyArmPose(currentArmAngle, pose);
-    pose[3] = v;
+    pose[R_SHOULDER_PITCH] = v;
     moveArmPose(pose);
     return;
   }
@@ -380,12 +418,41 @@ void parseSerialCommand(String cmd) {
     if (comma != -1) {
       int l = constrain(vals.substring(0, comma).toInt(), 0, 180);
       int r = constrain(vals.substring(comma + 1).toInt(), 0, 180);
-      int pose[6];
+      int pose[NUM_ARM];
       copyArmPose(currentArmAngle, pose);
-      pose[0] = l;
-      pose[3] = r;
+      pose[L_SHOULDER_PITCH] = l;
+      pose[R_SHOULDER_PITCH] = r;
       moveArmPose(pose);
     }
+    return;
+  }
+
+  // ── PALM PRESETS: <PALM:OPEN> <PALM:CLOSE> <PALM:CENTER> ──
+  if (inner == "PALM:OPEN")   { setPalms(PALM_OPEN,    PALM_OPEN);    return; }
+  if (inner == "PALM:CLOSE")  { setPalms(PALM_CLOSED,  PALM_CLOSED);  return; }
+  if (inner == "PALM:CENTER") { setPalms(PALM_NEUTRAL, PALM_NEUTRAL); return; }
+
+  // ── BOTH PALMS: <PALMS:left,right> ──
+  // Checked before the single-palm prefixes only for readability — "PALMS:" and
+  // "PL:"/"PR:" cannot collide.
+  if (inner.startsWith("PALMS:")) {
+    String vals = inner.substring(6);
+    int comma = vals.indexOf(',');
+    if (comma != -1) {
+      setPalms(vals.substring(0, comma).toInt(), vals.substring(comma + 1).toInt());
+    }
+    return;
+  }
+
+  // ── PALM LEFT: <PL:120> ──
+  if (inner.startsWith("PL:")) {
+    setPalms(inner.substring(3).toInt(), currentArmAngle[R_PALM]);
+    return;
+  }
+
+  // ── PALM RIGHT: <PR:120> ──
+  if (inner.startsWith("PR:")) {
+    setPalms(currentArmAngle[L_PALM], inner.substring(3).toInt());
     return;
   }
 }
@@ -443,15 +510,18 @@ int getArmServoAngle(int index, int angle) {
   return angle;
 }
 
-void copyArmPose(const int src[6], int dst[6]) {
-  for (int i = 0; i < 6; i++) dst[i] = src[i];
+void copyArmPose(const int src[NUM_ARM], int dst[NUM_ARM]) {
+  for (int i = 0; i < NUM_ARM; i++) dst[i] = src[i];
 }
 
-void moveArmPose(int targetPose[6]) {
+// An overload rather than a default argument: the Arduino builder hoists its own
+// prototypes above every call site, and a default declared only down here would
+// not be visible to the calls in parseSerialCommand().
+void moveArmPose(int targetPose[NUM_ARM], int stepDelayMs) {
   bool moving = true;
   while (moving) {
     moving = false;
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < NUM_ARM; i++) {
       if (currentArmAngle[i] != targetPose[i]) {
         moving = true;
         if (currentArmAngle[i] < targetPose[i]) currentArmAngle[i]++;
@@ -459,13 +529,40 @@ void moveArmPose(int targetPose[6]) {
         armServos[i].write(getArmServoAngle(i, currentArmAngle[i]));
       }
     }
-    delay(ARM_SPEED_DELAY_MS);
+    delay(stepDelayMs);
+  }
+}
+
+void moveArmPose(int targetPose[NUM_ARM]) {
+  moveArmPose(targetPose, ARM_SPEED_DELAY_MS);
+}
+
+// Move the palms without disturbing whatever pose the arms are holding.
+void setPalms(int leftAngle, int rightAngle) {
+  int pose[NUM_ARM];
+  copyArmPose(currentArmAngle, pose);
+  pose[L_PALM] = constrain(leftAngle,  PALM_MIN, PALM_MAX);
+  pose[R_PALM] = constrain(rightAngle, PALM_MIN, PALM_MAX);
+  moveArmPose(pose, PALM_STEP_DELAY_MS);
+}
+
+// Oscillate one wrist around the pose it is already in. Shared by WAVE:L/R and
+// GOODBYE so both gestures have the same rhythm.
+void wavePalm(int pose[NUM_ARM], byte palm, byte cycles) {
+  for (byte i = 0; i < cycles; i++) {
+    pose[palm] = WAVE_PALM_IN;
+    moveArmPose(pose, PALM_STEP_DELAY_MS);
+    pose[palm] = WAVE_PALM_OUT;
+    moveArmPose(pose, PALM_STEP_DELAY_MS);
   }
 }
 
 void doGoodbye() {
   moveArmPose(POSE_SALUTE);
   delay(GOODBYE_HOLD_MS);
+  int pose[NUM_ARM];
+  copyArmPose(POSE_SALUTE, pose);
+  wavePalm(pose, R_PALM, GOODBYE_WAVES);
   moveArmPose(POSE_HOME);
 }
 
@@ -522,24 +619,21 @@ void doDoubleBlink() {
   doBlink(); delay(200); doBlink();
 }
 
-// Wave: raise one arm, nudge elbow, return home
+// Wave: raise one arm, hold the forearm up, flick the wrist, return home
 void doWave(bool left) {
-  int pose[6];
+  const byte shoulder = left ? L_SHOULDER_PITCH : R_SHOULDER_PITCH;
+  const byte elbow    = left ? L_ELBOW          : R_ELBOW;
+  const byte palm     = left ? L_PALM           : R_PALM;
+
+  int pose[NUM_ARM];
   copyArmPose(POSE_HOME, pose);
-  if (left) {
-    pose[0] = 150;
-    pose[2] = 120;
-  } else {
-    pose[3] = 150;
-    pose[5] = 120;
-  }
+  pose[shoulder] = WAVE_SHOULDER;
+  pose[elbow]    = WAVE_ELBOW;
+  pose[palm]     = WAVE_PALM_OUT;
   moveArmPose(pose);
-  for (int i = 0; i < 3; i++) {
-    if (left) pose[2] = (i % 2 == 0) ? 150 : 90;
-    else      pose[5] = (i % 2 == 0) ? 150 : 90;
-    moveArmPose(pose);
-    delay(100);
-  }
+
+  wavePalm(pose, palm, WAVE_CYCLES);
+
   moveArmPose(POSE_HOME);
 }
 

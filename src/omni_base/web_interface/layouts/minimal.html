@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<title>LUMI · Minimal</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/eventemitter2/6.4.9/eventemitter2.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/roslib@1/build/roslib.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+  --bg:#000000; --surface:#0e0e10; --border:#232327;
+  --accent:#f5f5f7; --live:#30d158; --red:#ff453a; --yellow:#ffd60a;
+  --text:#f5f5f7; --dim:#8e8e93;
+}
+* { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+html, body { height:100%; overflow:hidden; }
+body {
+  background:var(--bg); color:var(--text); font-family:'Inter',system-ui,sans-serif;
+  user-select:none; display:flex; flex-direction:column; height:100vh;
+}
+
+/* ── Map fills everything ── */
+.map { flex:1; position:relative; overflow:hidden; }
+.map canvas { position:absolute; top:0; left:0; cursor:crosshair; }
+
+/* Floating status pill, top-centre */
+.status {
+  position:absolute; top:16px; left:50%; transform:translateX(-50%);
+  background:rgba(14,14,16,.86); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);
+  border:1px solid var(--border); border-radius:100px; padding:9px 20px;
+  display:flex; align-items:center; gap:11px; font-size:13px; font-weight:500; z-index:5;
+}
+.dot { width:7px; height:7px; border-radius:50%; background:var(--red); }
+body[data-connected="true"] .dot { background:var(--live); box-shadow:0 0 8px var(--live); }
+.status .divider { width:1px; height:15px; background:var(--border); }
+.status .muted { color:var(--dim); font-variant-numeric:tabular-nums; }
+
+/* Corner zoom */
+.zoom {
+  position:absolute; top:16px; right:16px; z-index:5;
+  display:flex; flex-direction:column; gap:7px;
+}
+.zoom button {
+  width:40px; height:40px; border-radius:12px; font-size:15px; cursor:pointer;
+  background:rgba(14,14,16,.86); backdrop-filter:blur(20px);
+  border:1px solid var(--border); color:var(--text);
+}
+.zoom button:active { background:var(--text); color:#000; }
+
+.hint {
+  position:absolute; bottom:16px; left:50%; transform:translateX(-50%);
+  font-size:11px; color:var(--dim); pointer-events:none; z-index:4;
+  background:rgba(14,14,16,.7); padding:5px 15px; border-radius:100px; white-space:nowrap;
+}
+
+/* ── One bottom bar ── */
+.bar {
+  background:var(--surface); border-top:1px solid var(--border);
+  padding:14px 18px; display:flex; align-items:center; gap:12px; overflow-x:auto;
+}
+.bar::-webkit-scrollbar { display:none; }
+
+select {
+  background:#1c1c1e; border:1px solid var(--border); color:var(--text);
+  padding:13px 38px 13px 16px; border-radius:13px; font-size:14px; outline:none;
+  appearance:none; font-family:inherit; cursor:pointer; min-width:175px; flex:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%238e8e93'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E");
+  background-repeat:no-repeat; background-position:right 13px center; background-size:16px;
+}
+
+.pad { display:flex; gap:7px; flex:none; }
+.pk {
+  width:50px; height:50px; border-radius:13px; background:#1c1c1e; border:1px solid var(--border);
+  color:var(--text); font-size:17px; cursor:pointer; display:flex; align-items:center;
+  justify-content:center; touch-action:none; transition:.1s; flex:none;
+}
+.pk.held { background:var(--text); color:#000; transform:scale(.92); }
+.pk.stop.held { background:var(--red); color:#fff; }
+
+.emo { display:flex; gap:7px; flex:none; }
+.emo button {
+  width:50px; height:50px; border-radius:13px; background:#1c1c1e;
+  border:1px solid var(--border); font-size:21px; cursor:pointer; transition:.1s; flex:none;
+}
+.emo button:active { background:var(--text); transform:scale(.9); }
+
+.flex { flex:1; min-width:8px; }
+.mini {
+  background:#1c1c1e; border:1px solid var(--border); border-radius:13px;
+  padding:9px 15px; font-size:11px; color:var(--dim); flex:none; text-align:center;
+}
+.mini b { display:block; color:var(--text); font-size:15px; font-weight:600; margin-top:2px; font-variant-numeric:tabular-nums; }
+[data-state="ok"] { color:var(--live)!important; }
+[data-state="warn"] { color:var(--yellow)!important; }
+[data-state="err"] { color:var(--red)!important; }
+
+.stop-btn {
+  background:var(--red); border:none; color:#fff; width:50px; height:50px;
+  border-radius:13px; font-size:19px; cursor:pointer; flex:none;
+}
+.stop-btn:active { transform:scale(.92); }
+.icon-btn {
+  background:#1c1c1e; border:1px solid var(--border); color:var(--text);
+  width:50px; height:50px; border-radius:13px; font-size:17px; cursor:pointer; flex:none;
+}
+.icon-btn:active { background:var(--text); color:#000; }
+.icon-btn.act { border-color:var(--text); background:#2c2c2e; }
+
+/* Settings sheet */
+.sheet {
+  position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:200;
+  display:none; align-items:flex-end; backdrop-filter:blur(6px);
+}
+.sheet.open { display:flex; }
+.sheet-in {
+  background:var(--surface); border-top:1px solid var(--border);
+  border-radius:22px 22px 0 0; padding:26px; width:100%;
+}
+.sheet-in h3 { font-size:17px; margin-bottom:16px; }
+.sheet-in input {
+  width:100%; background:#1c1c1e; border:1px solid var(--border); color:var(--text);
+  padding:15px; border-radius:13px; font-size:14px; margin-bottom:13px; outline:none; font-family:inherit;
+}
+.srow-btns { display:flex; gap:10px; flex-wrap:wrap; }
+.btn {
+  background:var(--text); border:none; color:#000; padding:14px 22px;
+  border-radius:13px; font-weight:600; font-size:14px; cursor:pointer; font-family:inherit;
+}
+.btn.ghost { background:#1c1c1e; border:1px solid var(--border); color:var(--text); }
+.btn.red { background:var(--red); color:#fff; }
+body[data-connected="true"] [data-action="connect"],
+body[data-connected="false"] [data-action="disconnect"] { display:none; }
+.modes { display:grid; grid-template-columns:repeat(4,1fr); gap:9px; margin-top:18px; }
+.mbtn {
+  padding:14px 4px; border:1px solid var(--border); background:#1c1c1e;
+  color:var(--dim); font-size:12px; border-radius:12px; cursor:pointer; text-align:center;
+}
+.mbtn.act { border-color:var(--text); color:var(--text); background:#2c2c2e; }
+
+.toast {
+  position:fixed; top:74px; left:50%; transform:translateX(-50%) translateY(-12px);
+  background:rgba(28,28,30,.95); backdrop-filter:blur(20px); border:1px solid var(--border);
+  border-radius:100px; padding:12px 26px; font-size:13.5px; font-weight:500;
+  z-index:999; opacity:0; transition:.3s; pointer-events:none;
+}
+.toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+
+@media (max-width:640px) { .mini { display:none; } }
+</style>
+</head>
+<body data-connected="false" data-nav="idle">
+
+<div class="map">
+  <canvas id="mapCanvas"></canvas>
+
+  <div class="status">
+    <div class="dot"></div>
+    <span data-lumi="navstate">Idle</span>
+    <div class="divider"></div>
+    <span class="muted"><span data-lumi="px">—</span>, <span data-lumi="py">—</span></span>
+  </div>
+
+  <div class="zoom">
+    <button data-action="zoom-in">+</button>
+    <button data-action="zoom-out">&minus;</button>
+    <button data-action="fit" style="font-size:9px;">FIT</button>
+  </div>
+
+  <div class="hint" data-lumi="hint"></div>
+</div>
+
+<div class="bar">
+  <select data-lumi="rooms" data-autogo></select>
+
+  <div class="pad">
+    <div class="pk" data-drive="0,1">&#9664;</div>
+    <div class="pk" data-drive="1,0">&#9650;</div>
+    <div class="pk stop" data-drive="0,0">&#9632;</div>
+    <div class="pk" data-drive="-1,0">&#9660;</div>
+    <div class="pk" data-drive="0,-1">&#9654;</div>
+  </div>
+
+  <div class="emo">
+    <button data-emotion="happy">&#128512;</button>
+    <button data-emotion="neutral">&#128528;</button>
+    <button data-emotion="sad">&#128546;</button>
+    <button data-emotion="blink">&#128069;</button>
+  </div>
+
+  <div class="flex"></div>
+
+  <div class="mini">speed<b data-lumi="vel">0.00 / 0.00</b></div>
+  <div class="mini">zoom<b data-lumi="zoom">1.0x</b></div>
+
+  <button class="icon-btn" data-action="fullscreen" title="Fullscreen">&#9974;</button>
+  <button class="icon-btn" onclick="document.getElementById('sheet').classList.add('open')" title="Settings">&#9881;</button>
+  <button class="stop-btn" data-action="stop" title="Stop">&#9632;</button>
+</div>
+
+<!-- Settings sheet -->
+<div class="sheet" id="sheet" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="sheet-in">
+    <h3>Connection</h3>
+    <input type="text" data-lumi="url" placeholder="ws://192.168.1.10:9090"/>
+    <div class="srow-btns">
+      <button class="btn" data-action="connect">Connect</button>
+      <button class="btn red" data-action="disconnect">Disconnect</button>
+      <button class="btn red" data-action="cancel">Cancel goal</button>
+      <button class="btn ghost" onclick="document.getElementById('sheet').classList.remove('open')">Done</button>
+    </div>
+
+    <h3 style="margin-top:24px;">Map mode</h3>
+    <div class="modes">
+      <div class="mbtn act" data-mode="goal">Goal</div>
+      <div class="mbtn" data-mode="add">Save</div>
+      <div class="mbtn" data-mode="teleop">Pan</div>
+      <div class="mbtn" data-mode="pose">Pose</div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" data-lumi="toast"><span data-lumi="toast-msg"></span></div>
+
+<input type="hidden" data-lumi="lin-speed" value="0.20"/>
+<input type="hidden" data-lumi="ang-speed" value="0.50"/>
+
+<script src="../lumi-core.js"></script>
+<script>LUMI.init({ canvas: 'mapCanvas' });</script>
+</body>
+</html>

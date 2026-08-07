@@ -429,10 +429,13 @@ class VoiceNode(Node):
         # ── HEAD LOOK (must precede 'center' so "look center" is not eaten by reset) ──
         elif 'look left'  in text:
             self.body_cmd('<LOOK:L>'); self.publish_head(30.0)
+            self.speak_async('Looking left.')
         elif 'look right' in text:
             self.body_cmd('<LOOK:R>'); self.publish_head(150.0)
+            self.speak_async('Looking right.')
         elif 'look forward' in text or 'look center' in text:
             self.body_cmd('<LOOK:C>'); self.publish_head(90.0)
+            self.speak_async('Looking forward.')
 
         # ── ARMS / HANDS (6-DOF poses on Mega) ──
         # Goodbye / bye before generic greetings so "see you" is not missed.
@@ -463,6 +466,18 @@ class VoiceNode(Node):
             self.speak_async('Hands down.')
             self.body_cmd('<HAND_DOWN>')
             self.publish_hands(0.0, 0.0)
+
+        # ── PALMS / WRISTS (servos on Mega pins 44/45) ──
+        elif any(w in text for w in ['open hand', 'open palm', 'open your hand',
+                                     'let go', 'release']):
+            self.set_emotion('happy')
+            self.speak_async('Opening.')
+            self.body_cmd('<PALM:OPEN>')
+        elif any(w in text for w in ['close hand', 'close palm', 'close your hand',
+                                     'make a fist', 'grab', 'grip', 'hold this']):
+            self.set_emotion('neutral')
+            self.speak_async('Closing.')
+            self.body_cmd('<PALM:CLOSE>')
 
         elif 'reset' in text or 'center' in text:
             self.set_emotion('neutral'); self.body_cmd('<CENTER>'); self.speak_async('Reset.')

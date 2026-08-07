@@ -21,6 +21,8 @@ A ROS 2 (Humble) workspace for a voice-controlled, LiDAR-based autonomous servic
 4. [Localization, Mapping & Navigation](#4-localization-mapping--navigation)
 5. [Robot Model (URDF)](#5-robot-model-urdf)
 6. [Web Interface](#6-web-interface)
+   - [6.1 Control panel layouts (for the tablet)](#61-control-panel-layouts-for-the-tablet)
+   - [6.2 Original dashboard](#62-original-dashboard)
 7. [Quick Start — Clone & Run](#7-quick-start--clone--run)
 8. [Full Run Guide](#8-full-run-guide)
 9. [Manual Testing Commands](#9-manual-testing-commands)
@@ -77,7 +79,10 @@ ros2_ws/
 │   │   │   └── nav2_params.yaml
 │   │   ├── urdf/omniserv.urdf   ← robot URDF model (single source of truth)
 │   │   ├── maps/                ← my_room_map.pgm / .yaml
-│   │   ├── web_interface/index.html
+│   │   ├── web_interface/
+│   │   │   ├── index.html          ← original single-file dashboard
+│   │   │   ├── lumi-core.js        ← shared ROS logic for all layouts
+│   │   │   └── layouts/            ← 6 tablet control panel layouts + picker
 │   │   ├── package.xml
 │   │   └── setup.py
 │   ├── rf2o_laser_odometry/     ← 3rd-party: laser scan-matching odometry
@@ -126,7 +131,8 @@ right_pwm = linear_x + angular_z × (wheel_separation / 2)
 | Stop | `STOP` | Sends `<0,0>` immediately |
 | Servo / animation | `NOD`, `SHAKE`, `EBLINK`, `CENTER`, `WAVE:L`, `WAVE:R` | Forwarded as `<CMD>` |
 | Arm poses | `HOME`, `HAND_UP`, `HAND_DOWN`, `PULL_UP`, `PULL_DOWN`, `SALUTE`, `GOODBYE` | Forwarded as `<CMD>` |
-| Servo pose prefix | `HP:`, `EL:`, `ER:`, `EY:`, `HL:`, `HR:`, `HANDS:` | Forwarded as `<CMD>` |
+| Palm presets | `PALM:OPEN`, `PALM:CLOSE`, `PALM:CENTER` | Forwarded as `<CMD>` |
+| Servo pose prefix | `HP:`, `EL:`, `ER:`, `EY:`, `HL:`, `HR:`, `HANDS:`, `PL:`, `PR:`, `PALMS:` | Forwarded as `<CMD>` |
 
 Timed drive pulses the Arduino at **10 Hz** to keep its watchdog alive. On node shutdown, `<0,0>` is always sent to stop the motors.
 
@@ -171,6 +177,7 @@ Microphone → Google STT → text
 | Movement | "go forward", "move back", "turn left", "turn right", "stop" |
 | Head / body | "look left", "look right", "look forward", "nod", "shake", "blink", "wink" |
 | Arms | "wave", "wave left", "hands up", "hands down", "salute", "goodbye" / "bye", "pull up", "pull down" |
+| Palms | "open hand" / "let go" / "release", "close hand" / "make a fist" / "grab" / "grip" |
 | Reset | "reset", "center" |
 | AI question | anything else → answered by Gemini |
 
@@ -308,9 +315,38 @@ Key design decisions:
 
 ## 6. Web Interface
 
-**File:** `src/omni_base/web_interface/index.html`
+**Files:**
+- `src/omni_base/web_interface/layouts/` — six tablet-ready control panel layouts (**recommended**)
+- `src/omni_base/web_interface/lumi-core.js` — shared ROS logic behind all six
+- `src/omni_base/web_interface/index.html` — the original single-file dashboard
 
-A standalone browser dashboard that renders the live Nav2 global costmap in real time using **roslibjs** + **ros2djs**. Open it from any device on the same Wi-Fi network as the Pi.
+A standalone browser dashboard that renders the live Nav2 global costmap in real time using **roslibjs**. Open it from any device on the same Wi-Fi network as the Pi.
+
+### 6.1 Control panel layouts (for the tablet)
+
+Open `web_interface/layouts/index.html` to preview all six side by side and
+choose one. They are functionally identical — `kiosk.html` is the one intended
+for a wall-mounted tablet the public can touch, since it keeps teleop and
+connection settings behind a settings gear.
+
+Unlike the original `index.html`, these are built for touch: pointer events
+throughout, pinch-to-zoom and two-finger pan on the map, drive buttons that
+cannot leave the robot rolling if a finger slips, and an automatic stop when
+the tab loses focus. The rosbridge address is remembered per-tablet and
+reconnects on its own, so a wall panel recovers by itself after a reboot.
+
+Serve them from the Pi so the connection address fills in automatically:
+
+```bash
+cd ~/ros2_ws/src/omni_base/web_interface
+python3 -m http.server 8080
+# then browse to http://<pi-ip>:8080/layouts/ on the tablet
+```
+
+See `web_interface/layouts/README.md` for the full comparison table and the
+`data-*` attribute reference for adding controls to a layout.
+
+### 6.2 Original dashboard
 
 **Setup steps:**
 
@@ -539,6 +575,8 @@ ros2 topic pub --once /robot/body/command std_msgs/String "{data: '<NOD>'}"
 ros2 topic pub --once /robot/body/command std_msgs/String "{data: '<SHAKE>'}"
 ros2 topic pub --once /robot/body/command std_msgs/String "{data: '<WAVE:R>'}"
 ros2 topic pub --once /robot/body/command std_msgs/String "{data: '<EBLINK>'}"
+ros2 topic pub --once /robot/body/command std_msgs/String "{data: '<PALM:OPEN>'}"
+ros2 topic pub --once /robot/body/command std_msgs/String "{data: '<PALMS:150,30>'}"
 ros2 topic pub --once /robot/body/command std_msgs/String "{data: '<CENTER>'}"
 ```
 
@@ -622,5 +660,5 @@ ros2 topic list                              # all active topics
 - **Single source of truth for the URDF:** the model now lives at `src/omni_base/urdf/omniserv.urdf` and is read from the installed share path by `description.launch.py`. The old root-level copy was removed.
 - **Two map files** exist: `omniserv_map.*` at workspace root and `src/omni_base/maps/my_room_map.*` (the one Nav2 loads via `navigation.launch.py`). The root copy is a duplicate and can be removed once confirmed unused.
 - **EKF (`config/ekf.yaml`)** is provided but not launched. Enable it once wheel encoder odometry is wired into the Arduino and publishing on `/wheel/odom`.
-- **Room 4, reception, and lobby** coordinates in `config/rooms.yaml` are rough estimates — measure and update them from the saved map once the environment is finalized. Keep the web UI `ROOMS` list (`web_interface/index.html`) in sync with `config/rooms.yaml`.
+- **Room 4, reception, and lobby** coordinates in `config/rooms.yaml` are rough estimates — measure and update them from the saved map once the environment is finalized. Keep the web UI fallback lists — `ROOMS` in `web_interface/index.html` and `STATIC_ROOMS` in `web_interface/lumi-core.js` — in sync with `config/rooms.yaml`.
 - **Runtime saved locations:** When `use_voice:=true` or `use_web:=true`, `navigation.launch.py` also starts `location_manager`. It merges static rooms with user-saved points from `~/.ros/lumi_saved_locations.yaml`, publishes a latched `/saved_locations` (JSON), and accepts `/save_location` (JSON or `name|x|y|yaw`) and `/delete_location` (plain name). The web UI and `voice_node` consume this so "go to <name>" resolves both static rooms and user-saved points (user-saved shadow on name collision). The YAML is the durable store; the topic provides live sync.

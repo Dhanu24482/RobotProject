@@ -142,8 +142,10 @@ class ArduinoBridge(Node):
         elif cmd in ('NOD','SHAKE','EBLINK','EBLINK2','CENTER','WAVE:L','WAVE:R',
                      'LOOK:L','LOOK:R','LOOK:C',
                      'HOME','ARM_HOME','HAND_UP','HAND_DOWN',
-                     'PULL_UP','PULL_DOWN','SALUTE','GOODBYE') \
-          or cmd.startswith(('HP:','EL:','ER:','EY:','HL:','HR:','HANDS:','LOOK:')):
+                     'PULL_UP','PULL_DOWN','SALUTE','GOODBYE',
+                     'PALM:OPEN','PALM:CLOSE','PALM:CENTER') \
+          or cmd.startswith(('HP:','EL:','ER:','EY:','HL:','HR:','HANDS:','LOOK:',
+                             'PL:','PR:','PALMS:')):
             self.tx(f'<{clean}>\n')
             self.get_logger().info(f'Servo: <{clean}>')
 

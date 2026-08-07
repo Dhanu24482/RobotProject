@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<title>LUMI · Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/eventemitter2/6.4.9/eventemitter2.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/roslib@1/build/roslib.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+:root {
+  --bg:#f1f5f9; --card:#ffffff; --card2:#f8fafc; --border:#e2e8f0;
+  --accent:#0ea5e9; --accent-soft:#e0f2fe; --green:#059669; --green-soft:#d1fae5;
+  --red:#dc2626; --red-soft:#fee2e2; --yellow:#d97706; --text:#0f172a; --dim:#64748b;
+  --shadow:0 1px 3px rgba(15,23,42,.08), 0 1px 2px rgba(15,23,42,.04);
+  --shadow-lg:0 10px 25px rgba(15,23,42,.08);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:#0f172a; --card:#1e293b; --card2:#273449; --border:#334155;
+    --accent:#38bdf8; --accent-soft:rgba(56,189,248,.15); --green:#34d399; --green-soft:rgba(52,211,153,.15);
+    --red:#f87171; --red-soft:rgba(248,113,113,.15); --yellow:#fbbf24; --text:#f1f5f9; --dim:#94a3b8;
+    --shadow:0 1px 3px rgba(0,0,0,.3); --shadow-lg:0 10px 25px rgba(0,0,0,.35);
+  }
+}
+* { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+html, body { height:100%; }
+body {
+  background:var(--bg); color:var(--text); font-family:'Inter',system-ui,sans-serif;
+  user-select:none; overflow:hidden; display:flex; flex-direction:column; height:100vh;
+}
+::-webkit-scrollbar { width:8px; }
+::-webkit-scrollbar-thumb { background:var(--border); border-radius:5px; }
+
+header {
+  background:var(--card); border-bottom:1px solid var(--border);
+  padding:14px 24px; display:flex; align-items:center; gap:14px; box-shadow:var(--shadow); z-index:5;
+}
+.logo { font-size:21px; font-weight:800; letter-spacing:-.4px; }
+.logo span { color:var(--accent); }
+.grow { flex:1; }
+.badge {
+  display:flex; align-items:center; gap:8px; background:var(--red-soft); color:var(--red);
+  padding:8px 15px; border-radius:20px; font-size:12.5px; font-weight:600;
+}
+body[data-connected="true"] .badge { background:var(--green-soft); color:var(--green); }
+.dot { width:8px; height:8px; border-radius:50%; background:currentColor; }
+input[type=text] {
+  background:var(--card2); border:1px solid var(--border); color:var(--text);
+  padding:9px 14px; border-radius:9px; font-size:12.5px; width:200px; outline:none; font-family:inherit;
+}
+input[type=text]:focus { border-color:var(--accent); }
+.btn {
+  background:var(--accent); border:none; color:#fff; padding:9px 17px;
+  border-radius:9px; font-weight:600; font-size:12.5px; cursor:pointer; font-family:inherit;
+}
+.btn:active { transform:scale(.96); }
+.btn.ghost { background:var(--card2); border:1px solid var(--border); color:var(--text); }
+.btn.red { background:var(--red); }
+body[data-connected="true"] [data-action="connect"],
+body[data-connected="false"] [data-action="disconnect"] { display:none; }
+
+.grid {
+  flex:1; overflow-y:auto; padding:20px;
+  display:grid; gap:18px;
+  grid-template-columns:repeat(auto-fit, minmax(290px,1fr));
+  grid-auto-rows:min-content;
+}
+.card {
+  background:var(--card); border:1px solid var(--border); border-radius:16px;
+  padding:18px; box-shadow:var(--shadow);
+}
+.card h3 {
+  font-size:11px; text-transform:uppercase; letter-spacing:1.3px;
+  color:var(--dim); font-weight:700; margin-bottom:14px;
+}
+.card.wide { grid-column:span 2; }
+.card.map { grid-column:span 2; grid-row:span 2; padding:0; overflow:hidden; position:relative; min-height:420px; }
+.card.map canvas { position:absolute; top:0; left:0; cursor:crosshair; }
+.map-ctrl { position:absolute; top:12px; right:12px; display:flex; flex-direction:column; gap:6px; z-index:2; }
+.map-ctrl button {
+  width:36px; height:36px; border-radius:9px; border:1px solid var(--border);
+  background:var(--card); color:var(--text); cursor:pointer; font-size:14px; box-shadow:var(--shadow);
+}
+.map-badge {
+  position:absolute; bottom:12px; left:12px; z-index:2; background:var(--card);
+  border:1px solid var(--border); border-radius:9px; padding:7px 13px;
+  font-size:11px; color:var(--dim); box-shadow:var(--shadow);
+}
+
+.metric { display:flex; align-items:baseline; gap:8px; }
+.metric .num { font-size:32px; font-weight:800; letter-spacing:-1px; font-variant-numeric:tabular-nums; }
+.metric .unit { font-size:13px; color:var(--dim); }
+.subgrid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+
+.row { display:flex; justify-content:space-between; padding:8px 0; font-size:13px; color:var(--dim); border-bottom:1px solid var(--border); }
+.row:last-child { border-bottom:none; }
+.row b { color:var(--text); font-variant-numeric:tabular-nums; }
+[data-state="ok"] { color:var(--green)!important; }
+[data-state="warn"] { color:var(--yellow)!important; }
+[data-state="err"] { color:var(--red)!important; }
+
+.room-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); gap:9px; }
+.room-btn {
+  background:var(--card2); border:1px solid var(--border); color:var(--text);
+  padding:16px 8px; border-radius:11px; font-size:13px; font-weight:600;
+  cursor:pointer; font-family:inherit; text-transform:capitalize; transition:.15s;
+}
+.room-btn:active { background:var(--accent); color:#fff; transform:scale(.96); }
+
+.modes { display:grid; grid-template-columns:1fr 1fr; gap:9px; }
+.mbtn {
+  padding:13px 6px; border:1px solid var(--border); background:var(--card2);
+  color:var(--dim); font-size:12px; border-radius:10px; cursor:pointer; text-align:center; transition:.2s;
+}
+.mbtn.act { border-color:var(--accent); color:var(--accent); background:var(--accent-soft); font-weight:600; }
+
+.dpad { display:grid; grid-template-columns:repeat(3,58px); grid-template-rows:repeat(3,58px); gap:8px; justify-content:center; }
+.dp {
+  background:var(--card2); border:1px solid var(--border); color:var(--text);
+  font-size:19px; border-radius:11px; cursor:pointer; display:flex;
+  align-items:center; justify-content:center; touch-action:none; transition:.1s;
+}
+.dp.held { background:var(--accent); color:#fff; transform:scale(.92); }
+.dp.stop.held { background:var(--red); }
+
+.emo-grid { display:grid; grid-template-columns:repeat(6,1fr); gap:8px; }
+.emo-grid button, .body-grid button {
+  background:var(--card2); border:1px solid var(--border); color:var(--text);
+  padding:13px 2px; border-radius:10px; cursor:pointer; font-size:20px; font-family:inherit; transition:.15s;
+}
+.body-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:9px; }
+.body-grid button { font-size:12px; font-weight:500; }
+.emo-grid button:active, .body-grid button:active { background:var(--accent); transform:scale(.93); }
+
+.srow label { font-size:12px; color:var(--dim); display:flex; justify-content:space-between; margin-bottom:6px; }
+.srow label span { color:var(--accent); font-weight:600; }
+input[type=range] { width:100%; accent-color:var(--accent); height:4px; }
+select {
+  width:100%; background:var(--card2); border:1px solid var(--border); color:var(--text);
+  padding:11px 14px; border-radius:10px; font-size:13px; outline:none; font-family:inherit; cursor:pointer;
+}
+.log-box {
+  height:150px; overflow-y:auto; background:var(--card2); border:1px solid var(--border);
+  border-radius:10px; padding:10px; font-family:ui-monospace,monospace; font-size:10px; line-height:1.6;
+}
+.le { color:var(--dim); }
+.le[data-state="o"] { color:var(--green); }
+.le[data-state="w"] { color:var(--yellow); }
+.le[data-state="e"] { color:var(--red); }
+.le[data-state="i"] { color:var(--accent); }
+
+.toast {
+  position:fixed; top:80px; right:24px; background:var(--card);
+  border:1px solid var(--accent); border-radius:12px; padding:14px 22px;
+  font-size:13px; font-weight:600; z-index:999; box-shadow:var(--shadow-lg);
+  transform:translateX(140%); transition:transform .4s cubic-bezier(.18,.89,.32,1.28);
+}
+.toast.show { transform:translateX(0); }
+
+@media (max-width:800px) {
+  .card.wide, .card.map { grid-column:span 1; }
+  .card.map { min-height:320px; }
+  header { flex-wrap:wrap; }
+}
+</style>
+</head>
+<body data-connected="false" data-nav="idle">
+
+<header>
+  <div class="logo">LU<span>MI</span></div>
+  <div class="badge"><div class="dot"></div><span data-lumi="conn">Offline</span></div>
+  <div class="grow"></div>
+  <input type="text" data-lumi="url" placeholder="ws://PI_IP:9090"/>
+  <button class="btn" data-action="connect">Connect</button>
+  <button class="btn red" data-action="disconnect">Disconnect</button>
+  <button class="btn ghost" data-action="fullscreen">Fullscreen</button>
+  <button class="btn red" data-action="stop">STOP</button>
+</header>
+
+<div class="grid">
+
+  <div class="card map">
+    <canvas id="mapCanvas"></canvas>
+    <div class="map-ctrl">
+      <button data-action="zoom-in">+</button>
+      <button data-action="zoom-out">&minus;</button>
+      <button data-action="fit" style="font-size:9px;">FIT</button>
+    </div>
+    <div class="map-badge" data-lumi="hint"></div>
+  </div>
+
+  <div class="card">
+    <h3>Navigation</h3>
+    <div class="metric"><div class="num" data-lumi="navstate">Idle</div></div>
+    <div style="margin-top:14px;">
+      <div class="row"><span>Goal X</span><b data-lumi="gx">—</b></div>
+      <div class="row"><span>Goal Y</span><b data-lumi="gy">—</b></div>
+      <div class="row"><span>Destinations</span><b data-lumi="roomcount">0</b></div>
+    </div>
+    <button class="btn red" style="width:100%;margin-top:12px;" data-action="cancel">Cancel goal</button>
+  </div>
+
+  <div class="card">
+    <h3>Robot Pose</h3>
+    <div class="subgrid">
+      <div><div class="metric"><div class="num" data-lumi="px">—</div><div class="unit">x</div></div></div>
+      <div><div class="metric"><div class="num" data-lumi="py">—</div><div class="unit">y</div></div></div>
+    </div>
+    <div class="row" style="margin-top:12px;"><span>Heading</span><b data-lumi="pyaw">—</b></div>
+    <div class="row"><span>Velocity</span><b data-lumi="vel">0.00 / 0.00</b></div>
+  </div>
+
+  <div class="card wide">
+    <h3>Destinations</h3>
+    <div class="room-grid" data-lumi="room-buttons"></div>
+  </div>
+
+  <div class="card">
+    <h3>Map Mode</h3>
+    <div class="modes">
+      <div class="mbtn act" data-mode="goal">Send Goal</div>
+      <div class="mbtn" data-mode="add">Save Spot</div>
+      <div class="mbtn" data-mode="teleop">Pan Map</div>
+      <div class="mbtn" data-mode="pose">Set Pose</div>
+    </div>
+    <h3 style="margin-top:18px;">Quick select</h3>
+    <select data-lumi="rooms" data-autogo></select>
+  </div>
+
+  <div class="card">
+    <h3>Manual Drive</h3>
+    <div class="dpad">
+      <div></div><div class="dp" data-drive="1,0">&#9650;</div><div></div>
+      <div class="dp" data-drive="0,1">&#9664;</div>
+      <div class="dp stop" data-drive="0,0">&#9632;</div>
+      <div class="dp" data-drive="0,-1">&#9654;</div>
+      <div></div><div class="dp" data-drive="-1,0">&#9660;</div><div></div>
+    </div>
+    <div class="srow" style="margin-top:16px;">
+      <label>Linear <span data-lumi="lin-value">0.20</span> m/s</label>
+      <input type="range" data-lumi="lin-speed" min="0.05" max="0.5" step="0.05" value="0.2"/>
+    </div>
+    <div class="srow" style="margin-top:10px;">
+      <label>Angular <span data-lumi="ang-value">0.50</span> rad/s</label>
+      <input type="range" data-lumi="ang-speed" min="0.1" max="1.5" step="0.1" value="0.5"/>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Expression &amp; Body</h3>
+    <div class="emo-grid">
+      <button data-emotion="happy">&#128512;</button>
+      <button data-emotion="neutral">&#128528;</button>
+      <button data-emotion="sad">&#128546;</button>
+      <button data-emotion="angry">&#128545;</button>
+      <button data-emotion="surprised">&#128558;</button>
+      <button data-emotion="blink">&#128069;</button>
+    </div>
+    <div class="body-grid">
+      <button data-body="NOD">Nod</button>
+      <button data-body="SHAKE">Shake</button>
+      <button data-body="CENTER">Center</button>
+      <button data-body="WAVE:L">Wave L</button>
+      <button data-body="WAVE:R">Wave R</button>
+      <button data-body="LOOK:C">Look C</button>
+      <button data-body="PALM:OPEN">Open Palms</button>
+      <button data-body="PALM:CLOSE">Close Palms</button>
+      <button data-body="SALUTE">Salute</button>
+    </div>
+    <div class="row" style="margin-top:12px;"><span>Eyes showing</span><b data-lumi="emotion">—</b></div>
+  </div>
+
+  <div class="card">
+    <h3>System Health</h3>
+    <div class="row"><span>/scan</span><b data-lumi="scan">—</b></div>
+    <div class="row"><span>/map</span><b data-lumi="mapstat">—</b></div>
+    <div class="row"><span>/amcl_pose</span><b data-lumi="amcl">—</b></div>
+    <div class="row"><span>Map size</span><b data-lumi="mapsize">—</b></div>
+    <div class="row"><span>Last heard</span><b data-lumi="voice">—</b></div>
+  </div>
+
+  <div class="card wide">
+    <h3>Activity Log</h3>
+    <div class="log-box" data-lumi="log"></div>
+  </div>
+
+</div>
+
+<div class="toast" data-lumi="toast"><span data-lumi="toast-msg"></span></div>
+
+<script src="../lumi-core.js"></script>
+<script>LUMI.init({ canvas: 'mapCanvas' });</script>
+</body>
+</html>

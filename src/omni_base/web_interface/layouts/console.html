@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+<title>LUMI · Console</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/eventemitter2/6.4.9/eventemitter2.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/roslib@1/build/roslib.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
+
+:root {
+  --bg: #0f172a; --panel: rgba(30,41,59,.85); --border: rgba(51,65,85,.9);
+  --accent: #38bdf8; --accent2: #f97316; --green: #10b981;
+  --red: #ef4444; --yellow: #f59e0b; --text: #f8fafc; --dim: #94a3b8;
+  --radius: 12px;
+}
+* { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+html, body { height:100%; overflow:hidden; }
+body {
+  background: var(--bg);
+  background-image: radial-gradient(circle at 50% 0%, #1e293b 0%, transparent 70%);
+  color: var(--text); font-family:'Inter',system-ui,sans-serif; user-select:none;
+  display:grid; grid-template-rows:58px 1fr 42px; grid-template-columns:280px 1fr 250px;
+  grid-template-areas:"hd hd hd" "sb mp ip" "ft ft ft"; height:100vh;
+}
+::-webkit-scrollbar { width:6px; height:6px; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius:4px; }
+
+header {
+  grid-area:hd; background:var(--panel); backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--border); display:flex; align-items:center;
+  padding:0 18px; gap:12px; z-index:10;
+}
+.logo { font-family:'JetBrains Mono',monospace; font-size:19px; font-weight:700; letter-spacing:1px; }
+.logo span { color: var(--accent); }
+.grow { flex:1; }
+.pill { display:flex; align-items:center; gap:8px; background:rgba(15,23,42,.6);
+        border:1px solid var(--border); border-radius:20px; padding:6px 14px; font-size:12px; font-weight:500; }
+.dot { width:8px; height:8px; border-radius:50%; background:var(--red); transition:.3s; }
+body[data-connected="true"] .dot { background:var(--green); box-shadow:0 0 8px var(--green); }
+
+input[type=text] {
+  background:rgba(15,23,42,.6); border:1px solid var(--border); color:var(--text);
+  font-family:'JetBrains Mono',monospace; font-size:12px; padding:8px 12px;
+  border-radius:8px; width:210px; outline:none;
+}
+input[type=text]:focus { border-color:var(--accent); }
+.btn {
+  background:var(--panel); border:1px solid var(--border); color:var(--text);
+  font-size:12px; font-weight:600; padding:8px 15px; border-radius:8px;
+  cursor:pointer; transition:.2s; font-family:inherit;
+}
+.btn:active { transform:scale(.96); }
+.btn.primary { background:var(--accent); border-color:var(--accent); color:#0f172a; }
+.btn.red { border-color:rgba(239,68,68,.5); color:var(--red); }
+.btn.red:active { background:var(--red); color:#fff; }
+body[data-connected="true"] [data-action="connect"],
+body[data-connected="false"] [data-action="disconnect"] { display:none; }
+
+aside, .ipanel {
+  background:var(--panel); backdrop-filter:blur(10px); display:flex; flex-direction:column;
+  overflow-y:auto; gap:11px; padding:14px;
+}
+aside { grid-area:sb; border-right:1px solid var(--border); }
+.ipanel { grid-area:ip; border-left:1px solid var(--border); }
+.slabel { font-size:10px; font-weight:600; letter-spacing:1.2px; color:var(--dim); text-transform:uppercase; }
+.sblock { background:rgba(15,23,42,.45); border:1px solid var(--border); border-radius:var(--radius); padding:12px; }
+
+select {
+  width:100%; background:rgba(0,0,0,.3); border:1px solid var(--border); color:var(--text);
+  padding:9px 32px 9px 12px; border-radius:8px; font-size:13px; outline:none;
+  appearance:none; cursor:pointer; font-family:inherit;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2394a3b8'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E");
+  background-repeat:no-repeat; background-position:right 10px center; background-size:15px;
+}
+
+.mode-grid { display:grid; grid-template-columns:1fr 1fr; gap:7px; }
+.mbtn {
+  padding:11px 4px; border:1px solid var(--border); background:rgba(15,23,42,.6);
+  color:var(--dim); font-size:11px; font-weight:500; border-radius:8px;
+  cursor:pointer; transition:.2s; text-align:center;
+}
+.mbtn.act { border-color:var(--accent); color:var(--accent); background:rgba(56,189,248,.12); }
+
+.dpad { display:grid; grid-template-columns:repeat(3,52px); grid-template-rows:repeat(3,52px); gap:6px; justify-content:center; margin-bottom:12px; }
+.dp {
+  background:rgba(30,41,59,.8); border:1px solid var(--border); color:var(--text);
+  font-size:18px; border-radius:8px; cursor:pointer; display:flex;
+  align-items:center; justify-content:center; touch-action:none; transition:.1s;
+}
+.dp.held { background:var(--accent); border-color:var(--accent); color:#0f172a; transform:scale(.93); }
+.dp.stop.held { background:var(--red); border-color:var(--red); color:#fff; }
+
+.srow { display:flex; flex-direction:column; gap:5px; margin-bottom:8px; }
+.srow label { font-size:11px; color:var(--dim); display:flex; justify-content:space-between; }
+.srow label span { color:var(--accent); font-family:'JetBrains Mono',monospace; }
+input[type=range] { width:100%; accent-color:var(--accent); height:4px; cursor:pointer; }
+
+.act-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:7px; }
+.act-btn {
+  padding:11px 3px; border:1px solid var(--border); background:rgba(15,23,42,.6);
+  color:var(--text); font-size:10px; border-radius:8px; cursor:pointer; transition:.2s; text-align:center;
+}
+.act-btn:active { border-color:var(--accent2); color:var(--accent2); transform:scale(.95); }
+.emo-btn { font-size:17px; padding:9px 3px; }
+
+.stat-row {
+  display:flex; justify-content:space-between; font-size:11.5px; padding:4px 0;
+  font-family:'JetBrains Mono',monospace; color:var(--dim);
+  border-bottom:1px solid rgba(51,65,85,.4);
+}
+.stat-row:last-child { border-bottom:none; }
+.stat-row b { color:var(--text); font-weight:700; }
+[data-state="ok"] { color:var(--green)!important; }
+[data-state="warn"] { color:var(--yellow)!important; }
+[data-state="err"] { color:var(--red)!important; }
+
+.log-box {
+  flex:1; min-height:120px; overflow-y:auto; background:rgba(15,23,42,.8);
+  border:1px solid var(--border); border-radius:var(--radius); padding:9px;
+  font-family:'JetBrains Mono',monospace; font-size:9.5px; line-height:1.5;
+}
+.le { padding:1px 0; color:var(--dim); }
+.le[data-state="i"] { color:var(--accent); }
+.le[data-state="o"] { color:var(--green); }
+.le[data-state="w"] { color:var(--yellow); }
+.le[data-state="e"] { color:var(--red); }
+
+main { grid-area:mp; position:relative; overflow:hidden; background:#020617; }
+main canvas { position:absolute; top:0; left:0; cursor:crosshair; }
+.map-hud { position:absolute; top:14px; left:14px; display:flex; flex-direction:column; gap:7px; pointer-events:none; }
+.hbadge {
+  background:rgba(15,23,42,.88); border:1px solid var(--border); border-radius:6px;
+  padding:5px 11px; font-family:'JetBrains Mono',monospace; font-size:10.5px; color:var(--dim);
+}
+.hbadge b { color:var(--text); }
+.zctrl { position:absolute; top:14px; right:14px; display:flex; flex-direction:column; gap:6px; }
+.zctrl .btn { width:38px; height:38px; display:flex; align-items:center; justify-content:center; font-size:15px; padding:0; }
+.map-hint {
+  position:absolute; bottom:14px; left:50%; transform:translateX(-50%);
+  background:rgba(15,23,42,.92); border:1px solid var(--border); border-radius:20px;
+  padding:7px 22px; font-size:11.5px; pointer-events:none; white-space:nowrap;
+}
+
+footer {
+  grid-area:ft; background:var(--panel); border-top:1px solid var(--border);
+  display:flex; align-items:center; padding:0 18px; gap:14px;
+  font-family:'JetBrains Mono',monospace; font-size:10.5px; color:var(--dim);
+}
+.fs b { color:var(--accent); }
+.fsep { width:1px; height:18px; background:var(--border); }
+.fright { margin-left:auto; display:flex; gap:9px; }
+body[data-nav="idle"] [data-action="cancel"] { display:none; }
+
+.toast {
+  position:fixed; top:70px; right:20px; background:var(--panel);
+  border:1px solid var(--accent); border-radius:8px; padding:13px 20px;
+  font-weight:500; font-size:13px; z-index:999;
+  transform:translateX(150%); transition:transform .4s cubic-bezier(.18,.89,.32,1.28);
+}
+.toast.show { transform:translateX(0); }
+
+@media (max-width:1100px) {
+  body { grid-template-columns:240px 1fr; grid-template-areas:"hd hd" "sb mp" "ft ft"; }
+  .ipanel { display:none; }
+}
+</style>
+</head>
+<body data-connected="false" data-nav="idle">
+
+<header>
+  <div class="logo">LU<span>MI</span></div>
+  <div class="grow"></div>
+  <input type="text" data-lumi="url" placeholder="ws://PI_IP:9090"/>
+  <button class="btn primary" data-action="connect">Connect</button>
+  <button class="btn red" data-action="disconnect">Disconnect</button>
+  <div class="pill"><div class="dot"></div><span data-lumi="conn">Offline</span></div>
+</header>
+
+<aside>
+  <div class="slabel">Quick Navigation</div>
+  <div class="sblock" style="border-color:var(--accent);">
+    <select data-lumi="rooms" style="margin-bottom:10px;"></select>
+    <button class="btn primary" style="width:100%;" data-action="go">Send Robot</button>
+  </div>
+
+  <div class="slabel">Interaction Mode</div>
+  <div class="sblock">
+    <div class="mode-grid">
+      <div class="mbtn act" data-mode="goal">Send Goal</div>
+      <div class="mbtn" data-mode="add">Save Loc</div>
+      <div class="mbtn" data-mode="teleop">Teleop</div>
+      <div class="mbtn" data-mode="pose">Init Pose</div>
+    </div>
+  </div>
+
+  <div class="slabel">Manual Drive</div>
+  <div class="sblock">
+    <div class="dpad">
+      <div></div><div class="dp" data-drive="1,0">&#9650;</div><div></div>
+      <div class="dp" data-drive="0,1">&#9664;</div>
+      <div class="dp stop" data-drive="0,0">&#9632;</div>
+      <div class="dp" data-drive="0,-1">&#9654;</div>
+      <div></div><div class="dp" data-drive="-1,0">&#9660;</div><div></div>
+    </div>
+    <div class="srow">
+      <label>Linear speed <span data-lumi="lin-value">0.20</span></label>
+      <input type="range" data-lumi="lin-speed" min="0.05" max="0.5" step="0.05" value="0.2"/>
+    </div>
+    <div class="srow">
+      <label>Angular speed <span data-lumi="ang-value">0.50</span></label>
+      <input type="range" data-lumi="ang-speed" min="0.1" max="1.5" step="0.1" value="0.5"/>
+    </div>
+  </div>
+
+  <div class="slabel">Body &amp; Animation</div>
+  <div class="sblock">
+    <div class="act-grid">
+      <div class="act-btn" data-body="NOD">Nod</div>
+      <div class="act-btn" data-body="SHAKE">Shake</div>
+      <div class="act-btn" data-body="CENTER">Center</div>
+      <div class="act-btn" data-body="WAVE:L">Wave L</div>
+      <div class="act-btn" data-body="WAVE:R">Wave R</div>
+      <div class="act-btn" data-body="LOOK:C">Look C</div>
+      <div class="act-btn" data-body="PALM:OPEN">Open Palms</div>
+      <div class="act-btn" data-body="PALM:CLOSE">Close Palms</div>
+      <div class="act-btn" data-body="SALUTE">Salute</div>
+    </div>
+  </div>
+
+  <div class="slabel">Eye Expression</div>
+  <div class="sblock">
+    <div class="act-grid">
+      <div class="act-btn emo-btn" data-emotion="happy">&#128512;</div>
+      <div class="act-btn emo-btn" data-emotion="neutral">&#128528;</div>
+      <div class="act-btn emo-btn" data-emotion="sad">&#128546;</div>
+      <div class="act-btn emo-btn" data-emotion="angry">&#128545;</div>
+      <div class="act-btn emo-btn" data-emotion="surprised">&#128558;</div>
+      <div class="act-btn emo-btn" data-emotion="blink">&#128069;</div>
+    </div>
+  </div>
+</aside>
+
+<main>
+  <canvas id="mapCanvas"></canvas>
+  <div class="map-hud">
+    <div class="hbadge">MAP <b data-lumi="mapsize">waiting</b></div>
+    <div class="hbadge">ZOOM <b data-lumi="zoom">1.0x</b></div>
+    <div class="hbadge">CURSOR <b data-lumi="cursor">0.00, 0.00</b></div>
+    <div class="hbadge">HEARD <b data-lumi="voice">—</b></div>
+  </div>
+  <div class="zctrl">
+    <button class="btn" data-action="zoom-in">+</button>
+    <button class="btn" data-action="zoom-out">&minus;</button>
+    <button class="btn" style="font-size:10px;" data-action="fit">FIT</button>
+  </div>
+  <div class="map-hint" data-lumi="hint"></div>
+</main>
+
+<div class="ipanel">
+  <div class="slabel">Navigation</div>
+  <div class="sblock">
+    <div class="stat-row"><span>STATUS</span><b data-lumi="navstate">Idle</b></div>
+    <div class="stat-row"><span>GOAL X</span><b data-lumi="gx">—</b></div>
+    <div class="stat-row"><span>GOAL Y</span><b data-lumi="gy">—</b></div>
+  </div>
+
+  <div class="slabel">AMCL Pose</div>
+  <div class="sblock">
+    <div class="stat-row"><span>POS X</span><b data-lumi="px">—</b></div>
+    <div class="stat-row"><span>POS Y</span><b data-lumi="py">—</b></div>
+    <div class="stat-row"><span>YAW</span><b data-lumi="pyaw">—</b></div>
+  </div>
+
+  <div class="slabel">Topics</div>
+  <div class="sblock">
+    <div class="stat-row"><span>/scan</span><b data-lumi="scan">—</b></div>
+    <div class="stat-row"><span>/map</span><b data-lumi="mapstat">—</b></div>
+    <div class="stat-row"><span>/amcl_pose</span><b data-lumi="amcl">—</b></div>
+    <div class="stat-row"><span>/body</span><b data-lumi="body">—</b></div>
+    <div class="stat-row"><span>EMOTION</span><b data-lumi="emotion">—</b></div>
+  </div>
+
+  <div class="slabel">System Log</div>
+  <div class="log-box" data-lumi="log"></div>
+</div>
+
+<footer>
+  <div class="fs">MODE <b data-lumi="mode">goal</b></div>
+  <div class="fsep"></div>
+  <div class="fs">BRIDGE <b data-lumi="rosurl">offline</b></div>
+  <div class="fsep"></div>
+  <div class="fs">VEL <b data-lumi="vel">0.00 / 0.00</b></div>
+  <div class="fsep"></div>
+  <div class="fs">DESTINATIONS <b data-lumi="roomcount">0</b></div>
+  <div class="fright">
+    <button class="btn red" data-action="cancel">Cancel Goal</button>
+    <button class="btn red" data-action="stop">EMERGENCY STOP</button>
+  </div>
+</footer>
+
+<div class="toast" data-lumi="toast"><span data-lumi="toast-msg"></span></div>
+
+<script src="../lumi-core.js"></script>
+<script>LUMI.init({ canvas: 'mapCanvas' });</script>
+</body>
+</html>

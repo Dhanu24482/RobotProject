@@ -1,8 +1,9 @@
 # OmniServ Firmware
 
 Arduino Mega 2560 firmware for the OmniServ / Lumi robot. Handles motor control
-(BTS7960 dual driver), animatronic servos, the HC-05 Bluetooth remote, and — as of
-the sensor upgrade — 6 ultrasonic + 4 IR pit sensors streamed to the Raspberry Pi.
+(BTS7960 dual driver), animatronic servos (8-DOF arms: shoulder, elbow and palm per
+side), the HC-05 Bluetooth remote, and — as of the sensor upgrade — 6 ultrasonic +
+4 IR pit sensors streamed to the Raspberry Pi.
 
 Sketch: [`omniserv_firmware/omniserv_firmware.ino`](omniserv_firmware/omniserv_firmware.ino)
 
@@ -33,10 +34,21 @@ Sketch: [`omniserv_firmware/omniserv_firmware.ino`](omniserv_firmware/omniserv_f
 | Right shoulder pitch | 41 |
 | Right shoulder roll | 42 |
 | Right elbow | 43 |
+| Left palm (wrist) | 44 |
+| Right palm (wrist) | 45 |
 
-> Pins 38–43 avoid the BTS7960 motor pins (4–11). If you validated 6-DOF poses on a
+> Pins 38–45 avoid the BTS7960 motor pins (4–11). If you validated 6-DOF poses on a
 > standalone Mega using `{2,8,4,5,6,7}`, rewire the arms to 38–43 before flashing
 > OmniServ (or change `ARM_PINS` in the sketch).
+
+> **Servo budget — do not exceed 12.** 4 head/eye + 8 arm = 12, which is exactly what
+> one AVR timer drives. The Servo library fills Timer5 first, then Timer1, and Timer1
+> generates `analogWrite()` on pin 11 = `LPWM_2` = left motor reverse. A 13th servo
+> silently kills reverse on the left wheel (the robot spins instead of backing up).
+> Move `LPWM_2` to free pin 9 before adding one.
+
+> Palms run off the same external 5 V BEC as the other servos — never the Mega's
+> onboard regulator — with a common ground back to the board.
 
 ### Lights & horn
 
@@ -81,15 +93,23 @@ Two links: `Serial` (USB, 115200) to the Pi/ROS2, and `Serial3` (9600) to the HC
 |---------|---------|
 | `<L,R>` | Motor PWM, e.g. `<100,80>` (-255..255 each) |
 | `<NOD>` `<SHAKE>` `<EBLINK>` `<CENTER>` | Animations |
-| `<WAVE:L>` `<WAVE:R>` | Wave a hand (6-DOF arm animation) |
+| `<WAVE:L>` `<WAVE:R>` | Wave a hand — shoulder lifts, elbow holds, wrist flicks |
 | `<HOME>` `<HAND_UP>` `<HAND_DOWN>` | Arm poses (synchronized) |
 | `<PULL_UP>` `<PULL_DOWN>` `<SALUTE>` | Arm poses |
-| `<GOODBYE>` | Salute, hold ~2.5 s, return home |
+| `<GOODBYE>` | Salute, hold, wave the raised wrist, return home |
 | `<HP:90>` | Head pan angle |
 | `<EL:80>` `<ER:100>` `<EY:x,y>` | Eye servos |
 | `<HL:90>` `<HR:90>` `<HANDS:l,r>` | Compat: map to shoulder pitch |
+| `<PL:120>` `<PR:120>` `<PALMS:l,r>` | Palm/wrist angles, 0–180 |
+| `<PALM:OPEN>` `<PALM:CLOSE>` `<PALM:CENTER>` | Both palms to 150 / 30 / 90 |
 | `<LOOK:L>` `<LOOK:R>` `<LOOK:C>` | Look left / right / center |
 | `<EBLINK2>` | Double blink |
+
+Palm angles are in robot space: `90` is flat neutral, higher opens, lower closes.
+The left palm is mirrored in firmware (`reverseArmServo`), so the same number means
+the same gesture on both hands. Palms are folded into every named pose — `HAND_UP`
+opens them, the `PULL_*` poses close them into a grip, and `SALUTE` flexes the right
+wrist toward the brow.
 
 ### Arduino -> Pi (telemetry, added in the sensor upgrade)
 
@@ -106,7 +126,8 @@ Emitted at ~10 Hz, never alters motor behavior (Nav2 decides what to do):
 ### Bluetooth app -> Arduino (unchanged, Serial3)
 
 `W` forward, `F` back, `A` left, `D` right, `S` stop, `0`-`9`/`k` speed levels,
-`B`/`b` lights, `M`/`m` horn, `N`/`n` nod/shake, `V`/`v` wave, `K` blink, `C` center.
+`B`/`b` lights, `M`/`m` horn, `N`/`n` nod/shake, `V`/`v` wave, `K` blink, `C` center,
+`G`/`g` open/close palms.
 
 ---
 

@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<title>LUMI · Kiosk</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/eventemitter2/6.4.9/eventemitter2.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/roslib@1/build/roslib.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+:root {
+  --bg: #0b1120;
+  --card: #131c31;
+  --card2: #1a2540;
+  --border: #24304d;
+  --accent: #3b82f6;
+  --green: #22c55e;
+  --red: #ef4444;
+  --yellow: #f59e0b;
+  --text: #f1f5f9;
+  --dim: #8595b0;
+}
+* { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color: transparent; }
+html, body { height:100%; overflow:hidden; }
+body {
+  background: var(--bg); color: var(--text);
+  font-family: 'Inter', system-ui, sans-serif; user-select:none;
+  display:grid; grid-template-rows: 78px 1fr; height:100vh;
+}
+
+/* ── Header ── */
+header {
+  background: var(--card); border-bottom:1px solid var(--border);
+  display:flex; align-items:center; padding:0 22px; gap:16px;
+}
+.logo { font-size:26px; font-weight:800; letter-spacing:-.5px; }
+.logo span { color: var(--accent); }
+.spacer { flex:1; }
+.status-chip {
+  display:flex; align-items:center; gap:9px; background: var(--card2);
+  border:1px solid var(--border); border-radius:30px; padding:9px 18px; font-size:14px; font-weight:600;
+}
+.dot { width:11px; height:11px; border-radius:50%; background: var(--red); }
+body[data-connected="true"] .dot { background: var(--green); box-shadow:0 0 10px var(--green); }
+.gear {
+  background: var(--card2); border:1px solid var(--border); color: var(--dim);
+  width:48px; height:48px; border-radius:12px; font-size:20px; cursor:pointer;
+}
+
+/* ── Body split ── */
+.main { display:grid; grid-template-columns: 1fr 380px; overflow:hidden; }
+
+/* Destinations */
+.dest { padding:22px; overflow-y:auto; }
+.dest h2 { font-size:15px; text-transform:uppercase; letter-spacing:1.5px; color:var(--dim); margin-bottom:16px; font-weight:600; }
+.room-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap:14px; }
+.room-btn {
+  background: var(--card); border:2px solid var(--border); color: var(--text);
+  padding:30px 16px; border-radius:18px; font-size:19px; font-weight:600;
+  cursor:pointer; transition:.15s; text-align:center; font-family:inherit;
+  min-height:104px; text-transform:capitalize;
+}
+.room-btn:active { transform:scale(.96); border-color:var(--accent); background:var(--card2); }
+
+/* Side rail */
+.side {
+  background: var(--card); border-left:1px solid var(--border);
+  padding:20px; display:flex; flex-direction:column; gap:16px; overflow-y:auto;
+}
+.mini-map { height:210px; background:#020617; border-radius:14px; overflow:hidden; position:relative; border:1px solid var(--border); }
+.mini-map canvas { display:block; }
+
+.status-card { background: var(--card2); border-radius:14px; padding:16px; }
+.status-card .big { font-size:22px; font-weight:700; margin-bottom:4px; }
+.status-card .sub { font-size:13px; color: var(--dim); }
+[data-state="ok"]   { color: var(--green); }
+[data-state="warn"] { color: var(--yellow); }
+[data-state="err"]  { color: var(--red); }
+
+.emo-grid { display:grid; grid-template-columns: repeat(3,1fr); gap:10px; }
+.emo-grid button {
+  background: var(--card2); border:1px solid var(--border); color:var(--text);
+  padding:16px 0; border-radius:12px; font-size:24px; cursor:pointer; transition:.15s;
+}
+.emo-grid button:active { background: var(--accent); transform:scale(.93); }
+
+.big-stop {
+  background: var(--red); border:none; color:#fff; padding:22px;
+  border-radius:16px; font-size:19px; font-weight:800; cursor:pointer;
+  font-family:inherit; letter-spacing:.5px; margin-top:auto;
+}
+.big-stop:active { transform:scale(.97); }
+.label { font-size:12px; text-transform:uppercase; letter-spacing:1.2px; color:var(--dim); font-weight:600; }
+
+/* ── Settings drawer ── */
+.drawer {
+  position:fixed; inset:0; background:rgba(3,7,18,.85); z-index:100;
+  display:none; align-items:center; justify-content:center; padding:20px;
+}
+.drawer.open { display:flex; }
+.drawer-box { background: var(--card); border:1px solid var(--border); border-radius:20px; padding:28px; width:min(520px,100%); }
+.drawer-box h3 { margin-bottom:18px; font-size:19px; }
+.drawer-box input {
+  width:100%; background: var(--bg); border:1px solid var(--border); color:var(--text);
+  padding:15px; border-radius:12px; font-size:15px; margin-bottom:14px; outline:none; font-family:inherit;
+}
+.drawer-box input:focus { border-color: var(--accent); }
+.drow { display:flex; gap:10px; flex-wrap:wrap; }
+.btn {
+  background: var(--accent); border:none; color:#fff; padding:14px 24px;
+  border-radius:12px; font-weight:600; font-size:14px; cursor:pointer; font-family:inherit;
+}
+.btn.ghost { background: var(--card2); border:1px solid var(--border); color:var(--text); }
+.btn.red { background: var(--red); }
+body[data-connected="true"] [data-action="connect"],
+body[data-connected="false"] [data-action="disconnect"] { display:none; }
+
+.dpad { display:grid; grid-template-columns:repeat(3,60px); grid-template-rows:repeat(3,60px); gap:8px; justify-content:center; margin-top:14px; }
+.dp {
+  background: var(--card2); border:1px solid var(--border); color:var(--text);
+  font-size:20px; border-radius:12px; cursor:pointer; display:flex;
+  align-items:center; justify-content:center; touch-action:none;
+}
+.dp.held { background: var(--accent); transform:scale(.92); }
+
+.toast {
+  position:fixed; bottom:28px; left:50%; transform:translateX(-50%) translateY(18px);
+  background: var(--card2); border:1px solid var(--accent); border-radius:14px;
+  padding:16px 32px; font-weight:600; font-size:15px; z-index:999;
+  opacity:0; transition:.35s; pointer-events:none;
+}
+.toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+
+@media (max-width: 860px) {
+  .main { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+  .side { border-left:none; border-top:1px solid var(--border); }
+  .mini-map { height:150px; }
+}
+</style>
+</head>
+<body data-connected="false" data-nav="idle">
+
+<header>
+  <div class="logo">LU<span>MI</span></div>
+  <div class="spacer"></div>
+  <div class="status-chip"><div class="dot"></div><span data-lumi="conn">Offline</span></div>
+  <button class="gear" onclick="document.getElementById('drawer').classList.add('open')">&#9881;</button>
+</header>
+
+<div class="main">
+
+  <section class="dest">
+    <h2>Where should I go?</h2>
+    <!-- Filled automatically from the robot's known + saved locations -->
+    <div class="room-grid" data-lumi="room-buttons"></div>
+  </section>
+
+  <aside class="side">
+    <div class="mini-map"><canvas id="mapCanvas"></canvas></div>
+
+    <div class="status-card">
+      <div class="big" data-lumi="navstate">Idle</div>
+      <div class="sub">Position <span data-lumi="px">—</span>, <span data-lumi="py">—</span></div>
+    </div>
+
+    <div>
+      <div class="label" style="margin-bottom:10px;">Say hello</div>
+      <div class="emo-grid">
+        <button data-emotion="happy"     title="Happy">&#128512;</button>
+        <button data-emotion="neutral"   title="Neutral">&#128528;</button>
+        <button data-emotion="sad"       title="Sad">&#128546;</button>
+        <button data-emotion="surprised" title="Surprised">&#128558;</button>
+        <button data-emotion="angry"     title="Angry">&#128545;</button>
+        <button data-emotion="blink"     title="Blink">&#128069;</button>
+        <button data-body="NOD"          title="Nod">&#128077;</button>
+        <button data-body="WAVE:R"       title="Wave">&#128075;</button>
+        <button data-body="SHAKE"        title="Shake head">&#128078;</button>
+        <button data-body="PALM:OPEN"    title="Open palms">&#128400;</button>
+        <button data-body="PALM:CLOSE"   title="Close palms">&#9994;</button>
+      </div>
+    </div>
+
+    <button class="big-stop" data-action="stop">STOP THE ROBOT</button>
+  </aside>
+
+</div>
+
+<!-- Settings drawer: staff-only bits kept out of the main view -->
+<div class="drawer" id="drawer" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="drawer-box">
+    <h3>Robot connection</h3>
+    <input type="text" data-lumi="url" placeholder="ws://192.168.1.10:9090"/>
+    <div class="drow">
+      <button class="btn" data-action="connect">Connect</button>
+      <button class="btn red" data-action="disconnect">Disconnect</button>
+      <button class="btn ghost" data-action="fit">Fit map</button>
+      <button class="btn ghost" data-action="fullscreen">Fullscreen</button>
+      <button class="btn ghost" onclick="document.getElementById('drawer').classList.remove('open')">Close</button>
+    </div>
+
+    <h3 style="margin-top:26px;">Manual drive</h3>
+    <div class="dpad">
+      <div></div><div class="dp" data-drive="1,0">&#9650;</div><div></div>
+      <div class="dp" data-drive="0,1">&#9664;</div>
+      <div class="dp" data-drive="0,0">&#9632;</div>
+      <div class="dp" data-drive="0,-1">&#9654;</div>
+      <div></div><div class="dp" data-drive="-1,0">&#9660;</div><div></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" data-lumi="toast"><span data-lumi="toast-msg"></span></div>
+
+<input type="hidden" data-lumi="lin-speed" value="0.18"/>
+<input type="hidden" data-lumi="ang-speed" value="0.45"/>
+
+<script src="../lumi-core.js"></script>
+<script>LUMI.init({ canvas: 'mapCanvas' });</script>
+</body>
+</html>
