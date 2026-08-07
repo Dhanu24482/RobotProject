@@ -153,8 +153,11 @@ int POSE_SALUTE[NUM_ARM]    = {0, 90, 90, 180, 60, 150, WRIST_NEUTRAL, WRIST_SAL
 // Wave geometry: the shoulder lifts the arm, the elbow holds the forearm up, and
 // only the wrist flaps. The original version swept the elbow, which moved the whole
 // forearm instead of reading as a hand wave.
+// Elbow neutral is 90, so 60 folds the forearm up toward the head. The old wave
+// used 120 — the opposite fold — but swept the elbow 90..150 while doing it, so
+// the wrong direction was never obvious. Held still behind a wrist wave, it is.
 const int  WAVE_SHOULDER = 150;
-const int  WAVE_ELBOW    = 120;
+const int  WAVE_ELBOW    = 60;
 const byte WAVE_CYCLES   = 3;
 const byte GOODBYE_WAVES = 2;
 
