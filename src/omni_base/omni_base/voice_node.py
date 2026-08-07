@@ -223,6 +223,18 @@ class VoiceNode(Node):
         self.drive_pwm     = self.declare_parameter('drive_pwm', 20).value
         # ── Robot name (wake-word trigger) — change here to rename the robot ──
         self.robot_name    = self.declare_parameter('robot_name', 'lumi').value.lower().strip()
+        # Google STT rarely returns "lumi" cleanly — it clips or mangles the name
+        # into things like "l", "lu", "lum", "lomi". All of these count as the
+        # wake word; the greeting prefix keeps them from firing on stray speech.
+        name_aliases       = self.declare_parameter('name_aliases', [
+            'lumi', 'lumy', 'lumie', 'lumee', 'loomi', 'loomy', 'lomi', 'lomy',
+            'lume', 'lum', 'lu', 'l', 'louie', 'lewis', 'looney', 'roomy',
+        ]).value
+        # Longest first so "lumi" wins over "lu" and the remainder is correct.
+        self._wake_names   = sorted(
+            {self.robot_name, *(a.lower().strip() for a in name_aliases if a.strip())},
+            key=len, reverse=True,
+        )
         voice_topic        = self.declare_parameter('voice_topic',   '/robot/voice/command').value
         body_topic         = self.declare_parameter('body_topic',   '/robot/body/command').value
         head_topic         = self.declare_parameter('head_topic',   '/robot/head/pose').value
@@ -326,20 +338,21 @@ class VoiceNode(Node):
                 time.sleep(1)
 
     def _strip_wake_word(self, text):
-        """Return the command after the robot name, or None if not addressed to the robot.
+        """Return the command after the wake word, or None if not addressed to the robot.
 
-        Requires the name to appear at the start of the utterance and at a word
-        boundary so that a name like "lumi" does not trigger on "lumiian".
-        Any leading punctuation or whitespace (e.g. the comma in "lumi, go to
+        Requires a greeting prefix followed by the robot's name or one of its
+        known mis-transcriptions: "(hey|hi|hello) <name> <command>". The name
+        must end on a word boundary so "hi lu" matches but "hi lucy" does not.
+        Any leading punctuation or whitespace (e.g. the comma in "hi lumi, go to
         office") is stripped from the remainder.
 
         Returns:
-            None   — the utterance does not start with the robot's name; ignore it.
-            ''     — only the bare name was spoken; caller should acknowledge.
-            str    — the command text with the name prefix removed.
+            None   — the utterance is not addressed to the robot; ignore it.
+            ''     — only the greeting and name were spoken; caller should acknowledge.
+            str    — the command text with the wake word removed.
         """
-        # Requires a greeting prefix: (hey|hi|hello) lumi <command>
-        pattern = r'^(?:hey|hi|hello)\s+' + re.escape(self.robot_name) + r'\b'
+        names = '|'.join(re.escape(n) for n in self._wake_names)
+        pattern = r'^(?:hey|hi|hello)\s+(?:' + names + r')\b'
         m = re.match(pattern, text)
         if not m:
             return None
