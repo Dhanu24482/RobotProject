@@ -11,8 +11,14 @@ Hardware (shared SPI bus):
   SCK  -> Pin 23 (GPIO 11/SCLK)  MOSI  -> Pin 19 (GPIO 10/MOSI)
   D/C  -> Pin 18 (GPIO 24)       RESET -> Pin 22 (GPIO 25)
   LED  -> Pin 2 or 4 (5V)
-  CS Left  -> Pin 24 (GPIO 8 / CE0)   [left eye]
-  CS Right -> Pin 26 (GPIO 7 / CE1)   [right eye]
+  CS Left  -> Pin 29 (GPIO 5)    [left eye]
+  CS Right -> Pin 31 (GPIO 6)    [right eye]
+
+The chip-selects deliberately avoid the hardware CE0/CE1 pins. board.SPI()
+opens /dev/spidev0.0, so the kernel drives CE0 (GPIO 8) low on every transfer
+regardless of which CS the driver toggles. With a panel wired to CE0 that panel
+is selected during the other panel's writes and both show the same frame.
+Plain GPIOs are untouched by the kernel, so each panel is selected on its own.
 
 Import-guarded: on non-Pi systems (e.g. Windows dev box, SPI disabled) the
 node starts headless — it still subscribes and logs emotions, so the ROS graph
@@ -82,8 +88,8 @@ class EyesNode(Node):
 
     def _init_displays(self):
         try:
-            cs_left  = digitalio.DigitalInOut(board.CE0)   # GPIO 8
-            cs_right = digitalio.DigitalInOut(board.CE1)   # GPIO 7
+            cs_left  = digitalio.DigitalInOut(board.D5)    # GPIO 5, Pin 29
+            cs_right = digitalio.DigitalInOut(board.D6)    # GPIO 6, Pin 31
             dc       = digitalio.DigitalInOut(board.D24)
             reset    = digitalio.DigitalInOut(board.D25)
             spi      = board.SPI()

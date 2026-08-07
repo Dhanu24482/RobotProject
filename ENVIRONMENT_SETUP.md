@@ -350,8 +350,10 @@ ls /dev/spidev0.*
 | D/C | Pin 18 | GPIO 24 |
 | RESET | Pin 22 | GPIO 25 |
 | LED | Pin 2 or 4 (5 V) | — (pulls from 5 V to prevent dimming) |
-| CS (Left eye) | Pin 24 | GPIO 8 / CE0 |
-| CS (Right eye) | Pin 26 | GPIO 7 / CE1 |
+| CS (Left eye) | Pin 29 | GPIO 5 |
+| CS (Right eye) | Pin 31 | GPIO 6 |
+
+> **Do not wire the chip-selects to CE0/CE1 (GPIO 8/7).** `board.SPI()` opens `/dev/spidev0.0`, so the kernel pulls CE0 low on every transfer no matter which chip-select the driver toggles. A panel on CE0 then gets selected during the *other* panel's writes and both eyes show the same frame. Plain GPIOs avoid this entirely.
 
 ### Install Python display libraries
 

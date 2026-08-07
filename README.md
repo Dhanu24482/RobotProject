@@ -249,9 +249,11 @@ Drives two 2.4" ILI9341 320x240 TFT displays connected to the Pi's hardware SPI0
 | MOSI | 19 | GPIO 10 |
 | D/C | 18 | GPIO 24 |
 | RESET | 22 | GPIO 25 |
-| CS Left | 24 | GPIO 8 / CE0 |
-| CS Right | 26 | GPIO 7 / CE1 |
+| CS Left | 29 | GPIO 5 |
+| CS Right | 31 | GPIO 6 |
 | LED | 2 or 4 | 5 V |
+
+> The chip-selects intentionally avoid CE0/CE1: the kernel drives CE0 low on every SPI transfer, which would select the left panel during the right panel's writes and make both eyes show the same frame.
 
 **Import-guarded:** on non-Pi systems (or when SPI is disabled) the node starts headless — it still subscribes and logs emotion changes, so the ROS graph never breaks. Enable SPI with `sudo raspi-config → Interface Options → SPI`. See [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md#7b-configure-eye-displays-dual-ili9341-tft) for full wiring and setup.
 
@@ -608,7 +610,7 @@ ros2 topic list                              # all active topics
 | Raspberry Pi | — | Runs ROS 2 Humble (Ubuntu 22.04) |
 | Arduino Mega 2560 | `/dev/arduino` (USB serial, 115200) | Motor driver + servo controller |
 | Slamtec RPLiDAR A1 | `/dev/rplidar` (USB serial) | 360° laser scanner |
-| 2× ILI9341 2.4" TFT | SPI0 CE0/CE1 | Eye emotion displays (driven by `eyes_node`) |
+| 2× ILI9341 2.4" TFT | SPI0, CS on GPIO 5/6 | Eye emotion displays (driven by `eyes_node`) |
 | USB microphone | ALSA default input | Voice command capture |
 | USB / 3.5 mm speaker | ALSA default output | TTS audio playback |
 
