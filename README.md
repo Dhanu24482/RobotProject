@@ -131,8 +131,8 @@ right_pwm = linear_x + angular_z × (wheel_separation / 2)
 | Stop | `STOP` | Sends `<0,0>` immediately |
 | Servo / animation | `NOD`, `SHAKE`, `EBLINK`, `CENTER`, `WAVE:L`, `WAVE:R` | Forwarded as `<CMD>` |
 | Arm poses | `HOME`, `HAND_UP`, `HAND_DOWN`, `PULL_UP`, `PULL_DOWN`, `SALUTE`, `GOODBYE` | Forwarded as `<CMD>` |
-| Palm presets | `PALM:OPEN`, `PALM:CLOSE`, `PALM:CENTER` | Forwarded as `<CMD>` |
-| Servo pose prefix | `HP:`, `EL:`, `ER:`, `EY:`, `HL:`, `HR:`, `HANDS:`, `PL:`, `PR:`, `PALMS:` | Forwarded as `<CMD>` |
+| Wrist presets | `WRIST:UP`, `WRIST:DOWN`, `WRIST:CENTER`, `WRIST:TEST` | Forwarded as `<CMD>` |
+| Servo pose prefix | `HP:`, `EL:`, `ER:`, `EY:`, `HL:`, `HR:`, `HANDS:`, `WL:`, `WR:`, `WRISTS:` | Forwarded as `<CMD>` |
 
 Timed drive pulses the Arduino at **10 Hz** to keep its watchdog alive. On node shutdown, `<0,0>` is always sent to stop the motors.
 
@@ -177,7 +177,7 @@ Microphone → Google STT → text
 | Movement | "go forward", "move back", "turn left", "turn right", "stop" |
 | Head / body | "look left", "look right", "look forward", "nod", "shake", "blink", "wink" |
 | Arms | "wave", "wave left", "hands up", "hands down", "salute", "goodbye" / "bye", "pull up", "pull down" |
-| Palms | "open hand" / "let go" / "release", "close hand" / "make a fist" / "grab" / "grip" |
+| Wrists | "wrist up", "wrist down", "wrist" (centers it) |
 | Reset | "reset", "center" |
 | AI question | anything else → answered by Gemini |
 
@@ -575,8 +575,8 @@ ros2 topic pub --once /robot/body/command std_msgs/String "{data: '<NOD>'}"
 ros2 topic pub --once /robot/body/command std_msgs/String "{data: '<SHAKE>'}"
 ros2 topic pub --once /robot/body/command std_msgs/String "{data: '<WAVE:R>'}"
 ros2 topic pub --once /robot/body/command std_msgs/String "{data: '<EBLINK>'}"
-ros2 topic pub --once /robot/body/command std_msgs/String "{data: '<PALM:OPEN>'}"
-ros2 topic pub --once /robot/body/command std_msgs/String "{data: '<PALMS:150,30>'}"
+ros2 topic pub --once /robot/body/command std_msgs/String "{data: '<WRIST:TEST>'}"
+ros2 topic pub --once /robot/body/command std_msgs/String "{data: '<WRISTS:110,70>'}"
 ros2 topic pub --once /robot/body/command std_msgs/String "{data: '<CENTER>'}"
 ```
 

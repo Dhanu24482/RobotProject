@@ -467,17 +467,14 @@ class VoiceNode(Node):
             self.body_cmd('<HAND_DOWN>')
             self.publish_hands(0.0, 0.0)
 
-        # ── PALMS / WRISTS (servos on Mega pins 44/45) ──
-        elif any(w in text for w in ['open hand', 'open palm', 'open your hand',
-                                     'let go', 'release']):
-            self.set_emotion('happy')
-            self.speak_async('Opening.')
-            self.body_cmd('<PALM:OPEN>')
-        elif any(w in text for w in ['close hand', 'close palm', 'close your hand',
-                                     'make a fist', 'grab', 'grip', 'hold this']):
-            self.set_emotion('neutral')
-            self.speak_async('Closing.')
-            self.body_cmd('<PALM:CLOSE>')
+        # ── WRISTS (hand flex only — servos on Mega pins 44/45) ──
+        # Kept distinct from "hands up/down" above, which raises the whole arm.
+        elif 'wrist up' in text:
+            self.body_cmd('<WRIST:UP>');     self.speak_async('Wrist up.')
+        elif 'wrist down' in text:
+            self.body_cmd('<WRIST:DOWN>');   self.speak_async('Wrist down.')
+        elif 'wrist' in text:
+            self.body_cmd('<WRIST:CENTER>'); self.speak_async('Wrist centered.')
 
         elif 'reset' in text or 'center' in text:
             self.set_emotion('neutral'); self.body_cmd('<CENTER>'); self.speak_async('Reset.')

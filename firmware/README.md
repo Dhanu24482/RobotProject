@@ -1,9 +1,9 @@
 # OmniServ Firmware
 
 Arduino Mega 2560 firmware for the OmniServ / Lumi robot. Handles motor control
-(BTS7960 dual driver), animatronic servos (8-DOF arms: shoulder, elbow and palm per
-side), the HC-05 Bluetooth remote, and — as of the sensor upgrade — 6 ultrasonic +
-4 IR pit sensors streamed to the Raspberry Pi.
+(BTS7960 dual driver), animatronic servos (8-DOF arms: two shoulder axes, an elbow
+and a wrist per side), the HC-05 Bluetooth remote, and — as of the sensor upgrade —
+6 ultrasonic + 4 IR pit sensors streamed to the Raspberry Pi.
 
 Sketch: [`omniserv_firmware/omniserv_firmware.ino`](omniserv_firmware/omniserv_firmware.ino)
 
@@ -34,8 +34,8 @@ Sketch: [`omniserv_firmware/omniserv_firmware.ino`](omniserv_firmware/omniserv_f
 | Right shoulder pitch | 41 |
 | Right shoulder roll | 42 |
 | Right elbow | 43 |
-| Left palm (wrist) | 44 |
-| Right palm (wrist) | 45 |
+| Right wrist | 44 |
+| Left wrist | 45 |
 
 > Pins 38–45 avoid the BTS7960 motor pins (4–11). If you validated 6-DOF poses on a
 > standalone Mega using `{2,8,4,5,6,7}`, rewire the arms to 38–43 before flashing
@@ -47,8 +47,32 @@ Sketch: [`omniserv_firmware/omniserv_firmware.ino`](omniserv_firmware/omniserv_f
 > silently kills reverse on the left wheel (the robot spins instead of backing up).
 > Move `LPWM_2` to free pin 9 before adding one.
 
-> Palms run off the same external 5 V BEC as the other servos — never the Mega's
+> Wrists run off the same external 5 V BEC as the other servos — never the Mega's
 > onboard regulator — with a common ground back to the board.
+
+### Wrist calibration
+
+The wrist joint only flexes the hand up and down (the waving motion). It is not a
+gripper and does not rotate the hand, so there is no open/close.
+
+Run `<WRIST:TEST>` — a slow sweep through the full travel on both sides — and adjust
+two things in the sketch:
+
+- **Travel:** `WRIST_MIN` / `WRIST_MAX` (default `60` / `120`, neutral `90`). Every
+  wrist command is clamped to this pair, and the wave and salute angles live inside
+  it, so this is the only place to widen or narrow the range. Keep it a few degrees
+  short of the mechanical stops.
+- **Direction:** if the left wrist flexes opposite to the right during the sweep,
+  flip the seventh entry of `reverseArmServo`.
+
+> The wrist entries in `ARM_PINS` are `{45, 44}`, not `{44, 45}` — pin 44 goes to the
+> **right** wrist. Crossed the other way each wrist also inherits the wrong mirror
+> flag, so both hands flex outward.
+
+> **Do not lower a servo step delay below ~25 ms.** All 12 servos share one AVR
+> timer, so each one is only pulsed every 20–25 ms. A faster loop discards the
+> intermediate angles and the joint lurches instead of sweeping. Speed comes from
+> `WRIST_STEP_DEG` (degrees per tick), never from a shorter delay.
 
 ### Lights & horn
 
@@ -100,16 +124,18 @@ Two links: `Serial` (USB, 115200) to the Pi/ROS2, and `Serial3` (9600) to the HC
 | `<HP:90>` | Head pan angle |
 | `<EL:80>` `<ER:100>` `<EY:x,y>` | Eye servos |
 | `<HL:90>` `<HR:90>` `<HANDS:l,r>` | Compat: map to shoulder pitch |
-| `<PL:120>` `<PR:120>` `<PALMS:l,r>` | Palm/wrist angles, 0–180 |
-| `<PALM:OPEN>` `<PALM:CLOSE>` `<PALM:CENTER>` | Both palms to 150 / 30 / 90 |
+| `<WL:110>` `<WR:110>` `<WRISTS:l,r>` | Wrist flex angles, clamped to 60–120 |
+| `<WRIST:UP>` `<WRIST:DOWN>` `<WRIST:CENTER>` | Both wrists to max / min / neutral |
+| `<WRIST:TEST>` | Slow calibration sweep of the full travel |
 | `<LOOK:L>` `<LOOK:R>` `<LOOK:C>` | Look left / right / center |
 | `<EBLINK2>` | Double blink |
 
-Palm angles are in robot space: `90` is flat neutral, higher opens, lower closes.
-The left palm is mirrored in firmware (`reverseArmServo`), so the same number means
-the same gesture on both hands. Palms are folded into every named pose — `HAND_UP`
-opens them, the `PULL_*` poses close them into a grip, and `SALUTE` flexes the right
-wrist toward the brow.
+Wrist angles are in robot space: `90` is the hand in line with the forearm, and the
+left wrist is mirrored in firmware (`reverseArmServo`) so the same number means the
+same flex on both hands. The named arm poses all keep the wrists neutral — they set
+where the hand *is*, not how it is angled — except `SALUTE`, which tilts the right
+hand up to the brow. `WAVE:L` / `WAVE:R` raise the arm with the shoulder, hold the
+forearm with the elbow, and flap only the wrist.
 
 ### Arduino -> Pi (telemetry, added in the sensor upgrade)
 
@@ -127,7 +153,7 @@ Emitted at ~10 Hz, never alters motor behavior (Nav2 decides what to do):
 
 `W` forward, `F` back, `A` left, `D` right, `S` stop, `0`-`9`/`k` speed levels,
 `B`/`b` lights, `M`/`m` horn, `N`/`n` nod/shake, `V`/`v` wave, `K` blink, `C` center,
-`G`/`g` open/close palms.
+`G`/`g`/`H` wrist up/down/neutral.
 
 ---
 

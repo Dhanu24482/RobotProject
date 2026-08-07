@@ -143,9 +143,9 @@ class ArduinoBridge(Node):
                      'LOOK:L','LOOK:R','LOOK:C',
                      'HOME','ARM_HOME','HAND_UP','HAND_DOWN',
                      'PULL_UP','PULL_DOWN','SALUTE','GOODBYE',
-                     'PALM:OPEN','PALM:CLOSE','PALM:CENTER') \
+                     'WRIST:UP','WRIST:DOWN','WRIST:CENTER','WRIST:TEST') \
           or cmd.startswith(('HP:','EL:','ER:','EY:','HL:','HR:','HANDS:','LOOK:',
-                             'PL:','PR:','PALMS:')):
+                             'WL:','WR:','WRISTS:')):
             self.tx(f'<{clean}>\n')
             self.get_logger().info(f'Servo: <{clean}>')
 

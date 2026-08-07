@@ -2,7 +2,8 @@
   OmniServ Robot - Full Control
   Hardware : Arduino Mega 2560
   Motors   : BTS7960 Dual Driver (ROS2 Nav2 + Bluetooth App)
-  Servos   : Head Pan, Eyes, Eyelid + 8-DOF humanoid arms (shoulder, elbow, palm)
+  Servos   : Head Pan, Eyes, Eyelid + 8-DOF humanoid arms
+             (per side: shoulder pitch + roll, elbow, wrist)
   Comms    : Serial  (USB) → Raspberry Pi / ROS2
              Serial3 (BT)  → HC-05 Bluetooth App
 
@@ -10,7 +11,8 @@
   Servo Commands (from Pi):  <HP:90>  <EL:80>  <EY:10,-5>  <NOD>  <SALUTE>  etc.
   Arm poses                :  <HOME> <HAND_UP> <HAND_DOWN> <PULL_UP> <PULL_DOWN>
                               <SALUTE> <GOODBYE>
-  Palms / wrists           :  <PL:120> <PR:120> <PALMS:l,r> <PALM:OPEN> <PALM:CLOSE>
+  Wrists (hand flex only)  :  <WL:110> <WR:110> <WRISTS:l,r>
+                              <WRIST:UP> <WRIST:DOWN> <WRIST:CENTER> <WRIST:TEST>
   Bluetooth      (from App): W F A D S 0-9 k B b M m  (unchanged)
 
   Arm pins 38-45 are free of motor/sensor conflicts. If you validated poses on a
@@ -52,16 +54,21 @@
 #define PIN_EYE_LID    13
 
 // 8-DOF arms (robot angles; reverse flags applied in getArmServoAngle).
-// The palms are appended after the original six joints rather than interleaved,
-// so every stored pose index and the HL:/HR:/HANDS: compat commands keep
-// addressing the same joint they always did.
+// Per side: two shoulder servos (pitch = up/down, roll = across the body), one
+// elbow, and one wrist. The wrists are appended after the original six joints
+// rather than interleaved, so every stored pose index and the HL:/HR:/HANDS:
+// compat commands keep addressing the same joint they always did.
+// Note the wrist pins run 45 then 44, against the ascending order of the rest:
+// on the harness pin 44 lands on the right wrist and 45 on the left. Wired the
+// other way round each wrist also picked up the opposite mirror flag, so both
+// hands flexed outward.
 #define NUM_ARM 8
-const byte ARM_PINS[NUM_ARM] = {38, 39, 40, 41, 42, 43, 44, 45};
+const byte ARM_PINS[NUM_ARM] = {38, 39, 40, 41, 42, 43, 45, 44};
 
 enum ArmJoint {
   L_SHOULDER_PITCH = 0, L_SHOULDER_ROLL, L_ELBOW,
   R_SHOULDER_PITCH,     R_SHOULDER_ROLL, R_ELBOW,
-  L_PALM,               R_PALM
+  L_WRIST,              R_WRIST
 };
 
 // ─── SENSOR PINS (sensor upgrade — telemetry only, never stops the bot) ─────
@@ -101,42 +108,53 @@ const int EYE_MAX     = 130;
 const int EYE_OPEN    = 30;   // Eyelid open position
 const int EYE_CLOSED  = 90;   // Eyelid closed position
 
-// Palm / wrist servos. 90 is flat neutral, and the left flag below mirrors the
-// mounting, so one number means the same gesture on both hands.
-const int PALM_NEUTRAL = 90;
-const int PALM_OPEN    = 150;
-const int PALM_CLOSED  = 30;
-const int PALM_SALUTE  = 135;  // wrist flexed toward the brow
-const int PALM_MIN     = 0;
-const int PALM_MAX     = 180;
+// ─── WRIST SERVOS (pins 44/45) ────────────────────────────────────────────
+// This joint only flexes the hand up and down, the way you flap a hand to wave.
+// It is not a gripper and it cannot rotate the hand, so there is no open/close.
+//
+// WRIST_MIN/WRIST_MAX are the mechanical travel limits and every wrist command is
+// clamped to them. Calibrate the joint by widening or narrowing this pair — the
+// gestures below are all expressed inside that range, so they follow along.
+const int WRIST_NEUTRAL = 90;   // hand in line with the forearm
+const int WRIST_MIN     = 60;   // fully flexed one way
+const int WRIST_MAX     = 120;  // fully flexed the other way
+const int WRIST_WAVE_LO = 70;   // wave sweeps between these two, kept inside the
+const int WRIST_WAVE_HI = 110;  // limits so a wave never drives into a hard stop
+const int WRIST_SALUTE  = 110;  // hand angled up at the brow
 
 // Calibrated robot-space arm angles (HOME)
-int currentArmAngle[NUM_ARM] = {0, 90, 90, 0, 90, 90, PALM_NEUTRAL, PALM_NEUTRAL};
+int currentArmAngle[NUM_ARM] = {0, 90, 90, 0, 90, 90, WRIST_NEUTRAL, WRIST_NEUTRAL};
 
-// Mirror left-side mechanical mounting
+// Mirror left-side mechanical mounting. If the left wrist flexes the opposite way
+// from the right during <WRIST:TEST>, flip the seventh flag.
 bool reverseArmServo[NUM_ARM] = {true, true, true, false, false, false, true, false};
 
-const int ARM_SPEED_DELAY_MS  = 40;  // ms per degree step (smooth parallel move)
-const int PALM_STEP_DELAY_MS  = 6;   // wrists are light; the arm cadence makes a
-                                     // 70 deg flick take ~3 s, far too slow to read
-                                     // as a wave
-const int GOODBYE_HOLD_MS     = 900; // pause on the salute; the wave fills the rest
+// Twelve servos share one AVR timer, so the Servo library's 20 ms refresh stretches
+// to fit all twelve pulses and each servo is actually updated only every ~20-25 ms.
+// A step delay below that throws away the intermediate angles and the joint lurches
+// instead of sweeping. Wrist speed therefore comes from degrees-per-tick, never from
+// a shorter delay.
+const int SERVO_REFRESH_MS = 25;
+const int WRIST_STEP_DEG   = 3;   // ~120 deg/s
+const int WRIST_TEST_DEG   = 1;   // slow crawl, for watching travel during setup
 
-// Named poses (robot angles)
-int POSE_HOME[NUM_ARM]      = {0, 90, 90, 0, 90, 90, PALM_NEUTRAL, PALM_NEUTRAL};
-int POSE_HAND_UP[NUM_ARM]   = {180, 90, 90, 180, 90, 90, PALM_OPEN, PALM_OPEN};
-int POSE_HAND_DOWN[NUM_ARM] = {0, 90, 90, 0, 90, 90, PALM_NEUTRAL, PALM_NEUTRAL};
-int POSE_PULL_UP[NUM_ARM]   = {0, 0, 180, 0, 0, 180, PALM_CLOSED, PALM_CLOSED};
-int POSE_PULL_DOWN[NUM_ARM] = {0, 180, 0, 0, 180, 0, PALM_CLOSED, PALM_CLOSED};
-int POSE_SALUTE[NUM_ARM]    = {0, 90, 90, 180, 60, 150, PALM_NEUTRAL, PALM_SALUTE};
+const int ARM_SPEED_DELAY_MS = 40;   // ms per degree step (smooth parallel move)
+const int GOODBYE_HOLD_MS    = 900;  // pause on the salute; the wave fills the rest
+
+// Named poses (robot angles). Wrists sit neutral in every pose except the salute:
+// the arm poses are about where the hand is, not how it is angled.
+int POSE_HOME[NUM_ARM]      = {0, 90, 90, 0, 90, 90, WRIST_NEUTRAL, WRIST_NEUTRAL};
+int POSE_HAND_UP[NUM_ARM]   = {180, 90, 90, 180, 90, 90, WRIST_NEUTRAL, WRIST_NEUTRAL};
+int POSE_HAND_DOWN[NUM_ARM] = {0, 90, 90, 0, 90, 90, WRIST_NEUTRAL, WRIST_NEUTRAL};
+int POSE_PULL_UP[NUM_ARM]   = {0, 0, 180, 0, 0, 180, WRIST_NEUTRAL, WRIST_NEUTRAL};
+int POSE_PULL_DOWN[NUM_ARM] = {0, 180, 0, 0, 180, 0, WRIST_NEUTRAL, WRIST_NEUTRAL};
+int POSE_SALUTE[NUM_ARM]    = {0, 90, 90, 180, 60, 150, WRIST_NEUTRAL, WRIST_SALUTE};
 
 // Wave geometry: the shoulder lifts the arm, the elbow holds the forearm up, and
-// only the wrist oscillates. The previous version swept the elbow, which flapped
-// the whole forearm instead of reading as a hand wave.
+// only the wrist flaps. The original version swept the elbow, which moved the whole
+// forearm instead of reading as a hand wave.
 const int  WAVE_SHOULDER = 150;
 const int  WAVE_ELBOW    = 120;
-const int  WAVE_PALM_IN  = 50;
-const int  WAVE_PALM_OUT = 130;
 const byte WAVE_CYCLES   = 3;
 const byte GOODBYE_WAVES = 2;
 
@@ -259,8 +277,10 @@ void loop() {
       case 'v': doWave(false);   break;  // Wave right
       case 'K': doBlink();       break;  // Blink eyes
       case 'C': centerAll();     break;  // Center everything
-      case 'G': setPalms(PALM_OPEN,   PALM_OPEN);   break;  // Open palms
-      case 'g': setPalms(PALM_CLOSED, PALM_CLOSED); break;  // Close palms
+      // Wrists flex up / down / back to neutral
+      case 'G': moveWrists(WRIST_MAX,     WRIST_MAX,     WRIST_STEP_DEG); break;
+      case 'g': moveWrists(WRIST_MIN,     WRIST_MIN,     WRIST_STEP_DEG); break;
+      case 'H': moveWrists(WRIST_NEUTRAL, WRIST_NEUTRAL, WRIST_STEP_DEG); break;
 
       default: stopRobot(); break;
     }
@@ -427,32 +447,40 @@ void parseSerialCommand(String cmd) {
     return;
   }
 
-  // ── PALM PRESETS: <PALM:OPEN> <PALM:CLOSE> <PALM:CENTER> ──
-  if (inner == "PALM:OPEN")   { setPalms(PALM_OPEN,    PALM_OPEN);    return; }
-  if (inner == "PALM:CLOSE")  { setPalms(PALM_CLOSED,  PALM_CLOSED);  return; }
-  if (inner == "PALM:CENTER") { setPalms(PALM_NEUTRAL, PALM_NEUTRAL); return; }
+  // ── WRIST PRESETS: <WRIST:UP> <WRIST:DOWN> <WRIST:CENTER> <WRIST:TEST> ──
+  if (inner == "WRIST:UP") {
+    moveWrists(WRIST_MAX, WRIST_MAX, WRIST_STEP_DEG); return;
+  }
+  if (inner == "WRIST:DOWN") {
+    moveWrists(WRIST_MIN, WRIST_MIN, WRIST_STEP_DEG); return;
+  }
+  if (inner == "WRIST:CENTER") {
+    moveWrists(WRIST_NEUTRAL, WRIST_NEUTRAL, WRIST_STEP_DEG); return;
+  }
+  if (inner == "WRIST:TEST") { doWristTest(); return; }
 
-  // ── BOTH PALMS: <PALMS:left,right> ──
-  // Checked before the single-palm prefixes only for readability — "PALMS:" and
-  // "PL:"/"PR:" cannot collide.
-  if (inner.startsWith("PALMS:")) {
-    String vals = inner.substring(6);
+  // ── BOTH WRISTS: <WRISTS:left,right> ──
+  // Listed before the single-wrist prefixes only for readability — "WRISTS:" and
+  // "WL:"/"WR:" cannot collide.
+  if (inner.startsWith("WRISTS:")) {
+    String vals = inner.substring(7);
     int comma = vals.indexOf(',');
     if (comma != -1) {
-      setPalms(vals.substring(0, comma).toInt(), vals.substring(comma + 1).toInt());
+      moveWrists(vals.substring(0, comma).toInt(),
+                 vals.substring(comma + 1).toInt(), WRIST_STEP_DEG);
     }
     return;
   }
 
-  // ── PALM LEFT: <PL:120> ──
-  if (inner.startsWith("PL:")) {
-    setPalms(inner.substring(3).toInt(), currentArmAngle[R_PALM]);
+  // ── WRIST LEFT: <WL:110> ──
+  if (inner.startsWith("WL:")) {
+    moveWrist(L_WRIST, inner.substring(3).toInt(), WRIST_STEP_DEG);
     return;
   }
 
-  // ── PALM RIGHT: <PR:120> ──
-  if (inner.startsWith("PR:")) {
-    setPalms(currentArmAngle[L_PALM], inner.substring(3).toInt());
+  // ── WRIST RIGHT: <WR:110> ──
+  if (inner.startsWith("WR:")) {
+    moveWrist(R_WRIST, inner.substring(3).toInt(), WRIST_STEP_DEG);
     return;
   }
 }
@@ -537,32 +565,66 @@ void moveArmPose(int targetPose[NUM_ARM]) {
   moveArmPose(targetPose, ARM_SPEED_DELAY_MS);
 }
 
-// Move the palms without disturbing whatever pose the arms are holding.
-void setPalms(int leftAngle, int rightAngle) {
-  int pose[NUM_ARM];
-  copyArmPose(currentArmAngle, pose);
-  pose[L_PALM] = constrain(leftAngle,  PALM_MIN, PALM_MAX);
-  pose[R_PALM] = constrain(rightAngle, PALM_MIN, PALM_MAX);
-  moveArmPose(pose, PALM_STEP_DELAY_MS);
+// Move the wrists without disturbing whatever pose the arms are holding. Steps
+// several degrees per tick at the servo refresh cadence rather than one degree as
+// fast as possible — see SERVO_REFRESH_MS for why the difference matters here.
+void moveWrists(int leftTarget, int rightTarget, int stepDeg) {
+  const int target[2] = {
+    constrain(leftTarget,  WRIST_MIN, WRIST_MAX),
+    constrain(rightTarget, WRIST_MIN, WRIST_MAX)
+  };
+  const byte joint[2] = { L_WRIST, R_WRIST };
+
+  bool moving = true;
+  while (moving) {
+    moving = false;
+    for (byte k = 0; k < 2; k++) {
+      int delta = target[k] - currentArmAngle[joint[k]];
+      if (delta == 0) continue;
+      moving = true;
+      int span = (delta > 0) ? delta : -delta;
+      int step = (span < stepDeg) ? span : stepDeg;
+      currentArmAngle[joint[k]] += (delta > 0) ? step : -step;
+      armServos[joint[k]].write(
+        getArmServoAngle(joint[k], currentArmAngle[joint[k]]));
+    }
+    delay(SERVO_REFRESH_MS);
+  }
 }
 
-// Oscillate one wrist around the pose it is already in. Shared by WAVE:L/R and
-// GOODBYE so both gestures have the same rhythm.
-void wavePalm(int pose[NUM_ARM], byte palm, byte cycles) {
+// Drive one wrist, leaving the other where it is.
+void moveWrist(byte wrist, int target, int stepDeg) {
+  moveWrists(wrist == L_WRIST ? target : currentArmAngle[L_WRIST],
+             wrist == R_WRIST ? target : currentArmAngle[R_WRIST],
+             stepDeg);
+}
+
+// Flap one wrist. Shared by WAVE:L/R and GOODBYE so both have the same rhythm.
+void waveWrist(byte wrist, byte cycles) {
   for (byte i = 0; i < cycles; i++) {
-    pose[palm] = WAVE_PALM_IN;
-    moveArmPose(pose, PALM_STEP_DELAY_MS);
-    pose[palm] = WAVE_PALM_OUT;
-    moveArmPose(pose, PALM_STEP_DELAY_MS);
+    moveWrist(wrist, WRIST_WAVE_LO, WRIST_STEP_DEG);
+    moveWrist(wrist, WRIST_WAVE_HI, WRIST_STEP_DEG);
   }
+  moveWrist(wrist, WRIST_NEUTRAL, WRIST_STEP_DEG);
+}
+
+// Slow sweep through the full calibrated travel, both wrists together. Use it to
+// check that the two sides flex the same way and that WRIST_MIN/WRIST_MAX stop
+// short of the mechanical stops.
+void doWristTest() {
+  moveWrists(WRIST_NEUTRAL, WRIST_NEUTRAL, WRIST_TEST_DEG);
+  delay(400);
+  moveWrists(WRIST_MIN, WRIST_MIN, WRIST_TEST_DEG);
+  delay(600);
+  moveWrists(WRIST_MAX, WRIST_MAX, WRIST_TEST_DEG);
+  delay(600);
+  moveWrists(WRIST_NEUTRAL, WRIST_NEUTRAL, WRIST_TEST_DEG);
 }
 
 void doGoodbye() {
   moveArmPose(POSE_SALUTE);
   delay(GOODBYE_HOLD_MS);
-  int pose[NUM_ARM];
-  copyArmPose(POSE_SALUTE, pose);
-  wavePalm(pose, R_PALM, GOODBYE_WAVES);
+  waveWrist(R_WRIST, GOODBYE_WAVES);
   moveArmPose(POSE_HOME);
 }
 
@@ -619,20 +681,19 @@ void doDoubleBlink() {
   doBlink(); delay(200); doBlink();
 }
 
-// Wave: raise one arm, hold the forearm up, flick the wrist, return home
+// Wave: raise one arm, hold the forearm up, flap the wrist, return home
 void doWave(bool left) {
   const byte shoulder = left ? L_SHOULDER_PITCH : R_SHOULDER_PITCH;
   const byte elbow    = left ? L_ELBOW          : R_ELBOW;
-  const byte palm     = left ? L_PALM           : R_PALM;
+  const byte wrist    = left ? L_WRIST          : R_WRIST;
 
   int pose[NUM_ARM];
   copyArmPose(POSE_HOME, pose);
   pose[shoulder] = WAVE_SHOULDER;
   pose[elbow]    = WAVE_ELBOW;
-  pose[palm]     = WAVE_PALM_OUT;
-  moveArmPose(pose);
+  moveArmPose(pose);          // wrist rides up neutral with the arm
 
-  wavePalm(pose, palm, WAVE_CYCLES);
+  waveWrist(wrist, WAVE_CYCLES);
 
   moveArmPose(POSE_HOME);
 }
