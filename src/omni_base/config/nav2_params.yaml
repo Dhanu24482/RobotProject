@@ -178,11 +178,13 @@ local_costmap:
       width: 3
       height: 3
       resolution: 0.05
-      robot_radius: 0.53
-      # range_layer (ultrasonic) + pit_layer (IR drop-offs) added for the sensor
-      # upgrade. They only augment the LOCAL costmap so the planner reroutes
-      # around low obstacles / pits; global tuning is untouched.
-      plugins: ["voxel_layer", "range_layer", "pit_layer", "inflation_layer"]
+      robot_radius: 0.45
+      # LiDAR only. The ultrasonic ring and the IR pit sensors reported obstacles
+      # and drop-offs that were not there, and because both layers mark without
+      # the laser being able to clear them, those phantoms stuck around and
+      # blocked routes. Their configuration is kept below but is inert while it
+      # is not listed here — re-add the names once the readings are filtered.
+      plugins: ["voxel_layer", "inflation_layer"]
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 3.0
@@ -207,6 +209,7 @@ local_costmap:
           raytrace_min_range: 0.0
           obstacle_max_range: 2.5
           obstacle_min_range: 0.0
+      # ── INERT (not listed in `plugins` above) ────────────────────────────────
       # Ultrasonic ring (6x HC-SR04) → marks low obstacles below the laser plane.
       range_layer:
         plugin: "nav2_costmap_2d::RangeSensorLayer"
@@ -221,6 +224,7 @@ local_costmap:
         clear_on_max_reading: True
         # Marks cells when the running probability exceeds mark_threshold and
         # clears below clear_threshold (defaults 0.5/0.2 work well here).
+      # ── INERT (not listed in `plugins` above) ────────────────────────────────
       # IR pit/cliff detections (PointCloud2) → keep-out marks so the bot avoids
       # drop-offs. Separate obstacle layer so the laser's clearing does not wipe
       # ground-level pit marks; stale marks scroll out of the rolling window.
@@ -250,7 +254,7 @@ global_costmap:
       global_frame: map
       robot_base_frame: base_link
       use_sim_time: False
-      robot_radius: 0.53
+      robot_radius: 0.45
       resolution: 0.05
       track_unknown_space: true
       plugins: ["static_layer", "obstacle_layer", "inflation_layer"]

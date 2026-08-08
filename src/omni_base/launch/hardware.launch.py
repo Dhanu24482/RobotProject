@@ -24,6 +24,7 @@ def generate_launch_description():
     max_speed        = LaunchConfiguration('max_speed')
     max_pwm          = LaunchConfiguration('max_pwm')
     min_pwm          = LaunchConfiguration('min_pwm')
+    publish_sensors  = LaunchConfiguration('publish_sensors')
 
     return LaunchDescription([
         DeclareLaunchArgument('lidar_port', default_value='/dev/rplidar',
@@ -38,6 +39,9 @@ def generate_launch_description():
                               description='Maximum PWM magnitude sent to motors (clamped in bridge)'),
         DeclareLaunchArgument('min_pwm', default_value='20',
                               description='Minimum PWM magnitude for non-zero motor commands (deadband)'),
+        DeclareLaunchArgument('publish_sensors', default_value='false',
+                              description='Publish ultrasonic /pit telemetry. Off by default: the '
+                                          'readings are unreliable indoors and Nav2 uses the LiDAR only'),
 
         # Robot description / TF tree
         IncludeLaunchDescription(
@@ -70,6 +74,7 @@ def generate_launch_description():
                 'max_speed': max_speed,
                 'max_pwm': max_pwm,
                 'min_pwm': min_pwm,
+                'publish_sensors': publish_sensors,
             }],
         ),
 

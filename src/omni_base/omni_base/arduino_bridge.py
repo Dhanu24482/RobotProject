@@ -48,6 +48,10 @@ class ArduinoBridge(Node):
         self.max_speed        = self.declare_parameter('max_speed', 1.0).value
         self.max_pwm          = self.declare_parameter('max_pwm', 30).value
         self.min_pwm          = self.declare_parameter('min_pwm', 20).value
+        # Ultrasonic + IR pit telemetry is off by default: both produced frequent
+        # false positives indoors and Nav2 now plans on the LiDAR alone. Launch
+        # with publish_sensors:=true to stream them again for debugging.
+        self.publish_sensors  = self.declare_parameter('publish_sensors', False).value
         self.is_driving       = False
 
         # Serial write lock — traffic is now bidirectional and writes come from
@@ -73,16 +77,22 @@ class ArduinoBridge(Node):
         )
 
         # ── Sensor publishers (telemetry from the Arduino) ──
-        self.us_pubs = {
-            name: self.create_publisher(Range, f'/ultrasonic/{name}', 10)
-            for name, _frame in self.US_SENSORS
-        }
-        self.pit_pub = self.create_publisher(PointCloud2, '/pit_obstacles', 10)
+        self.us_pubs = {}
+        self.pit_pub = None
+        if self.publish_sensors:
+            self.us_pubs = {
+                name: self.create_publisher(Range, f'/ultrasonic/{name}', 10)
+                for name, _frame in self.US_SENSORS
+            }
+            self.pit_pub = self.create_publisher(PointCloud2, '/pit_obstacles', 10)
 
         # ── Serial read loop (~20 Hz) — parses telemetry lines ──
         self.create_timer(0.05, self.read_serial)
 
-        self.get_logger().info('Bridge V2 ready.')
+        self.get_logger().info(
+            'Bridge V2 ready. Ultrasonic/IR telemetry '
+            + ('enabled.' if self.publish_sensors else 'disabled (LiDAR only).')
+        )
 
     # ── CMD_VEL → motors (Nav2 autonomous navigation) ────────
     def cmd_vel_cb(self, msg):
@@ -187,7 +197,11 @@ class ArduinoBridge(Node):
             if not text:
                 continue
             if text.startswith('#'):
-                self.parse_telemetry(text)
+                # The Mega always streams sensor lines; drop them here rather than
+                # asking the firmware to stop, so nothing depends on which sketch
+                # version is flashed.
+                if self.publish_sensors:
+                    self.parse_telemetry(text)
             else:
                 self.get_logger().debug(f'Arduino: {text}')
 

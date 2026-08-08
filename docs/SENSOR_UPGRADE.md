@@ -29,21 +29,45 @@ firmware emergency stop) was deliberate per the design discussion.
 
 ---
 
-## 2. Current implementation status (done in code, pending hardware)
+## 2. Current implementation status
 
 | Area | Change | State |
 |------|--------|-------|
-| Firmware | Sensor reading + telemetry + `<LOOK:*>`/`<EBLINK2>` commands | Implemented, not flashed |
-| ROS `arduino_bridge` | Reads telemetry, publishes `Range` + pit `PointCloud2` | Implemented, dormant (no telemetry arrives until hardware exists) |
+| Firmware | Sensor reading + telemetry + `<LOOK:*>`/`<EBLINK2>` commands | Implemented and flashed; still streams telemetry |
+| ROS `arduino_bridge` | Reads telemetry, publishes `Range` + pit `PointCloud2` | Implemented but **disabled by default** (`publish_sensors:=false`) |
 | URDF | 10 sensor TF frames | Implemented |
-| Nav2 | Ultrasonic + pit costmap layers | Implemented (layers simply receive no data until sensors stream) |
+| Nav2 | Ultrasonic + pit costmap layers | Configured but **not loaded** — `range_layer`/`pit_layer` are off the `plugins` list |
 | voice_node | `look`/`hands` commands wired; Gemini key rotation | Implemented and active now |
-| Web UI | New dashboard with sensor panels | Implemented (sensor panels show `--` until data arrives) |
+| Web UI | New dashboard with sensor panels | Implemented (sensor panels show `--` while telemetry is off) |
 | Tooling | `arduino-cli` flashing from the Pi | Implemented |
 
-Because no telemetry is produced until the sensors are physically present and the
-new firmware is flashed, the ROS publishers, costmap layers, and web sensor panels
-are simply idle. They do not affect navigation or any existing function.
+### Why they are switched off
+
+Once the sensors were physically installed, both produced frequent false positives
+indoors: the HC-SR04 ring picked up phantom returns and the IR modules flagged pits
+on ordinary flooring. That mattered more than it sounds, because `range_layer` and
+`pit_layer` both **mark** cells that the LiDAR cannot **clear** — `pit_layer` is
+explicitly `clearing: False` — so every false reading left a permanent keep-out blob
+in the local costmap until it scrolled out of the rolling window. The robot refused
+routes through clear space.
+
+Navigation therefore runs on the RPLiDAR alone, which is what the global costmap
+already used.
+
+### Turning them back on
+
+Two independent switches, both reversible without touching the firmware:
+
+1. **Telemetry** — launch with `publish_sensors:=true` to restore `/ultrasonic/*` and
+   `/pit_obstacles`. Useful for watching raw values while filtering.
+2. **Costmap influence** — add `"range_layer"` and/or `"pit_layer"` back to the
+   `plugins` list of `local_costmap` in
+   [`config/nav2_params.yaml`](../src/omni_base/config/nav2_params.yaml). Both blocks
+   are still there, marked inert, with their tuning intact.
+
+Do step 1 first and confirm the readings are trustworthy before step 2. If you re-add
+`pit_layer`, consider giving it a non-`False` clearing policy or a short expiry so a
+single bad frame cannot permanently block a route.
 
 ---
 

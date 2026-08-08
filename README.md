@@ -4,9 +4,10 @@ A ROS 2 (Humble) workspace for a voice-controlled, LiDAR-based autonomous servic
 
 > **New to this project?** Start with [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) to install all dependencies before building.
 >
-> **Planned hardware upgrade (not yet installed):** ultrasonic + IR pit sensors are
-> prepared in code/firmware but the physical sensors are not wired yet — see
-> [docs/SENSOR_UPGRADE.md](docs/SENSOR_UPGRADE.md) for status and the install checklist.
+> **Navigation is LiDAR-only.** The ultrasonic ring and IR pit sensors are wired and
+> the firmware streams them, but they reported obstacles that were not there, so they
+> no longer feed the costmaps and `arduino_bridge` does not publish them by default.
+> See [docs/SENSOR_UPGRADE.md](docs/SENSOR_UPGRADE.md) for how to turn them back on.
 
 ---
 
@@ -111,6 +112,19 @@ Translates ROS messages into serial commands for the Arduino Mega on `/dev/ardui
 |-------|------|-------------|
 | `/cmd_vel` | `geometry_msgs/Twist` | Autonomous navigation velocity from Nav2 |
 | `/robot/body/command` | `std_msgs/String` | High-level body/servo commands |
+
+**Publications**
+
+| Topic | Type | Description |
+|-------|------|-------------|
+| `/ultrasonic/<name>` | `sensor_msgs/Range` | Six HC-SR04 distances — **off by default** |
+| `/pit_obstacles` | `sensor_msgs/PointCloud2` | IR drop-off marks — **off by default** |
+
+Both are gated behind the `publish_sensors` parameter (default `false`). The readings
+proved unreliable indoors and left phantom keep-out blobs in the local costmap, so
+navigation now uses the LiDAR alone. Launch with `publish_sensors:=true` to stream
+them again; see [docs/SENSOR_UPGRADE.md](docs/SENSOR_UPGRADE.md) for the full path
+back to costmap use.
 
 **`/cmd_vel` handling — differential drive mixing:**
 
@@ -280,7 +294,7 @@ Drives two 2.4" ILI9341 320x240 TFT displays connected to the Pi's hardware SPI0
 
 **Nav2 tuning highlights** (`config/nav2_params.yaml`)
 
-- Robot radius: 0.53 m · Inflation radius: 0.55 m
+- Robot radius: 0.45 m · Inflation radius: 0.55 m
 - Controller: 20 Hz · Local costmap: 10 Hz · Global costmap: 1 Hz
 - DWB critics: `RotateToGoal`, `PathAlign`, `GoalAlign`, `PathDist`, `GoalDist`, `BaseObstacle`, `Oscillation`
 - Goal tolerance: 0.25 m (xy), 0.25 rad (yaw)
