@@ -148,7 +148,7 @@ int POSE_HAND_UP[NUM_ARM]   = {180, 90, 90, 180, 90, 90, WRIST_NEUTRAL, WRIST_NE
 int POSE_HAND_DOWN[NUM_ARM] = {0, 90, 90, 0, 90, 90, WRIST_NEUTRAL, WRIST_NEUTRAL};
 int POSE_PULL_UP[NUM_ARM]   = {0, 0, 180, 0, 0, 180, WRIST_NEUTRAL, WRIST_NEUTRAL};
 int POSE_PULL_DOWN[NUM_ARM] = {0, 180, 0, 0, 180, 0, WRIST_NEUTRAL, WRIST_NEUTRAL};
-int POSE_SALUTE[NUM_ARM]    = {0, 90, 90, 180, 60, 150, WRIST_NEUTRAL, WRIST_SALUTE};
+int POSE_SALUTE[NUM_ARM]    = {0, 90, 90, 180, 120, 30, WRIST_NEUTRAL, WRIST_SALUTE};
 
 // Wave geometry: the shoulder lifts the arm, the elbow holds the forearm up, and
 // only the wrist flaps. The original version swept the elbow, which moved the whole
