@@ -178,7 +178,7 @@ local_costmap:
       width: 3
       height: 3
       resolution: 0.05
-      robot_radius: 0.32
+      robot_radius: 0.53
       # range_layer (ultrasonic) + pit_layer (IR drop-offs) added for the sensor
       # upgrade. They only augment the LOCAL costmap so the planner reroutes
       # around low obstacles / pits; global tuning is untouched.
@@ -250,7 +250,7 @@ global_costmap:
       global_frame: map
       robot_base_frame: base_link
       use_sim_time: False
-      robot_radius: 0.32
+      robot_radius: 0.53
       resolution: 0.05
       track_unknown_space: true
       plugins: ["static_layer", "obstacle_layer", "inflation_layer"]

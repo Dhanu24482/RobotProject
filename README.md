@@ -280,7 +280,7 @@ Drives two 2.4" ILI9341 320x240 TFT displays connected to the Pi's hardware SPI0
 
 **Nav2 tuning highlights** (`config/nav2_params.yaml`)
 
-- Robot radius: 0.32 m · Inflation radius: 0.55 m
+- Robot radius: 0.53 m · Inflation radius: 0.55 m
 - Controller: 20 Hz · Local costmap: 10 Hz · Global costmap: 1 Hz
 - DWB critics: `RotateToGoal`, `PathAlign`, `GoalAlign`, `PathDist`, `GoalDist`, `BaseObstacle`, `Oscillation`
 - Goal tolerance: 0.25 m (xy), 0.25 rad (yaw)

@@ -22,7 +22,7 @@
   <link name="base_link">
     <visual>
       <geometry>
-        <cylinder radius="0.30" length="0.15"/>
+        <cylinder radius="0.40" length="0.15"/>
       </geometry>
       <origin xyz="0 0 0.075" rpy="0 0 0"/>
       <material name="white"/>
