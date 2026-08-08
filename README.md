@@ -131,11 +131,19 @@ back to costmap use.
 **`/cmd_vel` handling — differential drive mixing:**
 
 ```
-left_pwm  = linear_x − angular_z × (wheel_separation / 2)
-right_pwm = linear_x + angular_z × (wheel_separation / 2)
+left_speed  = linear_x − angular_z × (wheel_separation / 2)
+right_speed = linear_x + angular_z × (wheel_separation / 2)
+pwm         = sign × (min_pwm + |speed / max_speed| × (max_pwm − min_pwm))
 ```
 
-- `wheel_separation` = 0.35 m, `max_speed` = 1.0 m/s, `max_pwm` = 30, `min_pwm` = 20 (deadband clamp)
+- `wheel_separation` = 0.35 m, `max_speed` = 0.26 m/s, `max_pwm` = 30, `min_pwm` = 20
+- `max_speed` is the wheel speed that maps to `max_pwm`, so it must match
+  `max_speed_xy` in `nav2_params.yaml`. Setting it above what Nav2 will ever
+  command leaves the top of the PWM range unreachable and makes the speed
+  slider look dead during autonomous runs.
+- The motors stall under `min_pwm`, so the band starts there instead of at zero.
+  Scaling into the band rather than clamping to it keeps the two wheel values
+  distinct on gentle curves — a clamp pinned both to `min_pwm` and steered straight.
 - Sent to Arduino as `<L,R>\n`
 
 **Live drive speed — `/robot/speed`**
@@ -145,7 +153,7 @@ governs every drive path:
 
 | Path | How it picks the value up |
 |------|---------------------------|
-| Nav2 / web teleop (`/cmd_vel`) | `max_pwm` is the ceiling velocities scale into |
+| Nav2 / web teleop (`/cmd_vel`) | `max_pwm` is the top of the band velocities scale into |
 | `FORWARD` / `BACKWARD` / `LEFT` / `RIGHT` shortcuts | drive at `max_pwm` |
 | Bluetooth handset (HC-05) | bridge mirrors the value to the Mega as `<SPD:n>` |
 

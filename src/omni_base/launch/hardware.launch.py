@@ -33,8 +33,9 @@ def generate_launch_description():
                               description='Serial port for the Arduino Mega'),
         DeclareLaunchArgument('wheel_separation', default_value='0.35',
                               description='Wheel separation in meters (for differential drive mixing)'),
-        DeclareLaunchArgument('max_speed', default_value='1.0',
-                              description='Maximum linear speed (m/s) used for PWM scaling in arduino_bridge'),
+        DeclareLaunchArgument('max_speed', default_value='0.26',
+                              description='Wheel speed (m/s) that maps to max_pwm in arduino_bridge. '
+                                          'Keep it equal to max_speed_xy in nav2_params.yaml'),
         DeclareLaunchArgument('max_pwm', default_value='30',
                               description='Maximum PWM magnitude sent to motors (clamped in bridge)'),
         DeclareLaunchArgument('min_pwm', default_value='20',

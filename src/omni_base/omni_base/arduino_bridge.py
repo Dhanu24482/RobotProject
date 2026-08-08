@@ -6,6 +6,7 @@ from geometry_msgs.msg import Twist
 from std_msgs.msg import String, Header, Int32
 from sensor_msgs.msg import Range, PointCloud2
 from sensor_msgs_py import point_cloud2
+import math
 import serial
 import time
 import threading
@@ -46,7 +47,10 @@ class ArduinoBridge(Node):
         self.serial_port      = self.declare_parameter('serial_port', '/dev/arduino').value
         self.baud_rate        = self.declare_parameter('baud_rate', 115200).value
         self.wheel_separation = self.declare_parameter('wheel_separation', 0.35).value
-        self.max_speed        = self.declare_parameter('max_speed', 1.0).value
+        # Must track the fastest wheel speed Nav2 can ask for (max_speed_xy in
+        # nav2_params.yaml). Set it higher and the upper part of the PWM range is
+        # never reached, so raising max_pwm has no visible effect during autonomy.
+        self.max_speed        = self.declare_parameter('max_speed', 0.26).value
         self.max_pwm          = self.declare_parameter('max_pwm', 30).value
         self.min_pwm          = self.declare_parameter('min_pwm', 20).value
         # Ceiling for live speed changes on /robot/speed. 255 is the physical PWM
@@ -121,8 +125,8 @@ class ArduinoBridge(Node):
     def cmd_vel_cb(self, msg):
         l = msg.linear.x  - (msg.angular.z * self.wheel_separation / 2.0)
         r = msg.linear.x  + (msg.angular.z * self.wheel_separation / 2.0)
-        lp = int(max(min(self.db((l/self.max_speed)*self.max_pwm), 255), -255))
-        rp = int(max(min(self.db((r/self.max_speed)*self.max_pwm), 255), -255))
+        lp = self.scale_pwm(l)
+        rp = self.scale_pwm(r)
         self.tx(f'<{lp},{rp}>\n')
         # High-rate stream → debug only, so it doesn't flood the logs.
         self.get_logger().debug(f'Nav2 motors: L={lp} R={rp}')
@@ -312,10 +316,20 @@ class ArduinoBridge(Node):
         self.pit_pub.publish(cloud)
 
     # ── Helpers ───────────────────────────────────────────────
-    def db(self, pwm):
-        if   pwm > 0 and pwm <  self.min_pwm: return  self.min_pwm
-        elif pwm < 0 and pwm > -self.min_pwm: return -self.min_pwm
-        return pwm
+    def scale_pwm(self, wheel_speed):
+        """Map one wheel's velocity (m/s) onto the usable PWM band.
+
+        The motors stall below min_pwm, so the band runs from min_pwm to max_pwm
+        rather than from zero. Everything above the floor stays proportional: a
+        plain clamp pushed both wheels to min_pwm on gentle curves, which erased
+        the difference between them and drove the robot straight through turns.
+        """
+        if abs(wheel_speed) < 1e-3:
+            return 0
+        frac = max(-1.0, min(1.0, wheel_speed / self.max_speed))
+        span = max(0, self.max_pwm - self.min_pwm)
+        magnitude = min(self.min_pwm + abs(frac) * span, 255)
+        return int(math.copysign(magnitude, frac))
 
     def tx(self, cmd):
         if hasattr(self, 'arduino') and self.arduino.is_open:
