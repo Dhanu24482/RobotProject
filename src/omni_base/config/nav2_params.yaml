@@ -178,7 +178,7 @@ local_costmap:
       width: 3
       height: 3
       resolution: 0.05
-      robot_radius: 0.45
+      robot_radius: 0.53
       # LiDAR only. The ultrasonic ring and the IR pit sensors reported obstacles
       # and drop-offs that were not there, and because both layers mark without
       # the laser being able to clear them, those phantoms stuck around and
@@ -254,7 +254,7 @@ global_costmap:
       global_frame: map
       robot_base_frame: base_link
       use_sim_time: False
-      robot_radius: 0.45
+      robot_radius: 0.53
       resolution: 0.05
       track_unknown_space: true
       plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
