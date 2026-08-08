@@ -217,6 +217,11 @@ footer { grid-area: ft; background: var(--panel); border-top: 1px solid var(--bo
       <label>Angular Speed <span id="ang-v">0.50</span></label>
       <input type="range" id="ang-spd" min="0.1" max="1.5" step="0.1" value="0.5" oninput="document.getElementById('ang-v').textContent=parseFloat(this.value).toFixed(2)">
     </div>
+    <div class="srow">
+      <label>Robot Speed <span id="pwr-v">30</span> PWM (<span id="pwr-p">12%</span>) — all modes</label>
+      <input type="range" id="pwr-spd" min="20" max="255" step="5" value="30"
+             oninput="showSpeed(this.value)" onchange="setSpeed(this.value)">
+    </div>
   </div>
 
   <div class="slabel">Animations & Body</div>
@@ -322,7 +327,7 @@ let mode = 'goal';
 
 const canvas = document.getElementById('mapCanvas');
 const ctx    = canvas.getContext('2d');
-let cmdVelPub, goalPub, initialPosePub, bodyPub, saveLocationPub;
+let cmdVelPub, goalPub, initialPosePub, bodyPub, saveLocationPub, speedPub;
 
 // ═══════════════════════════════════════════════════════════
 //  QUICK NAVIGATION DROPDOWN HANDLER
@@ -375,6 +380,13 @@ function setupTopics() {
   // /save_location is the input topic that location_manager listens on;
   // it persists to disk and re-publishes the correct latched /saved_locations for voice node.
   saveLocationPub= new ROSLIB.Topic({ ros, name:'/save_location',    messageType:'std_msgs/String' });
+  speedPub       = new ROSLIB.Topic({ ros, name:'/robot/speed',      messageType:'std_msgs/Int32' });
+
+  // arduino_bridge owns the real drive speed and republishes it every couple of
+  // seconds, so the slider shows the configured default on connect and follows
+  // any change made from another tablet.
+  new ROSLIB.Topic({ ros, name:'/robot/speed/state', messageType:'std_msgs/Int32' })
+    .subscribe(msg => { document.getElementById('pwr-spd').value = msg.data; showSpeed(msg.data); });
 
   // Subscribe to voice commands from speech recognition node
   const voiceSub = new ROSLIB.Topic({ ros, name:'/robot/voice/command', messageType:'std_msgs/String' });
@@ -606,6 +618,20 @@ document.addEventListener('keyup',e=>{if(['ArrowUp','ArrowDown','ArrowLeft','Arr
 function bodyCmd(cmd){
   if(!connected){showToast('Connect ROS first!');return;}
   bodyPub.publish(new ROSLIB.Message({data:cmd})); log(`Animation → <${cmd}>`,'i');
+}
+
+// Global drive speed. Unlike the linear/angular sliders — which only shape the
+// Twist this page sends — this retunes the PWM ceiling on the robot, so it also
+// governs Nav2 goals, the voice shortcuts and the Bluetooth handset.
+function showSpeed(pwm){
+  document.getElementById('pwr-v').textContent = pwm;
+  document.getElementById('pwr-p').textContent = Math.round((pwm/255)*100)+'%';
+}
+function setSpeed(pwm){
+  if(!connected){showToast('Connect ROS first!');return;}
+  const v = Math.round(parseFloat(pwm));
+  speedPub.publish(new ROSLIB.Message({data:v}));
+  log(`Drive speed → ${v} PWM`,'i');
 }
 
 // ═══════════════════════════════════════════════════════════

@@ -8,6 +8,7 @@
              Serial3 (BT)  → HC-05 Bluetooth App
 
   Motor Command  (from Pi):  <left_pwm,right_pwm>     e.g. <100,80>
+  Drive speed    (from Pi):  <SPD:120>   sets the Bluetooth handset's speed
   Servo Commands (from Pi):  <HP:90>  <EL:80>  <EY:10,-5>  <NOD>  <SALUTE>  etc.
   Arm poses                :  <HOME> <HAND_UP> <HAND_DOWN> <PULL_UP> <PULL_DOWN>
                               <SALUTE> <GOODBYE>
@@ -341,6 +342,15 @@ void parseSerialCommand(String cmd) {
   // Extract content between < and >
   if (!cmd.startsWith("<") || !cmd.endsWith(">")) return;
   String inner = cmd.substring(1, cmd.length() - 1);  // strip < >
+
+  // ── DRIVE SPEED: <SPD:120> ──
+  // Only governs the Bluetooth handset. Motion commanded from the Pi arrives as an
+  // explicit <L,R> that has already been scaled there, so this keeps the HC-05
+  // driving at whatever speed ROS is currently using.
+  if (inner.startsWith("SPD:")) {
+    speedCar = constrain(inner.substring(4).toInt(), 0, 255);
+    return;
+  }
 
   // ── CENTER ALL: <CENTER> ──
   if (inner == "CENTER") { centerAll(); return; }

@@ -112,11 +112,13 @@ Translates ROS messages into serial commands for the Arduino Mega on `/dev/ardui
 |-------|------|-------------|
 | `/cmd_vel` | `geometry_msgs/Twist` | Autonomous navigation velocity from Nav2 |
 | `/robot/body/command` | `std_msgs/String` | High-level body/servo commands |
+| `/robot/speed` | `std_msgs/Int32` | Live drive speed (PWM magnitude) — see below |
 
 **Publications**
 
 | Topic | Type | Description |
 |-------|------|-------------|
+| `/robot/speed/state` | `std_msgs/Int32` | Current drive speed; latched and republished every 2 s |
 | `/ultrasonic/<name>` | `sensor_msgs/Range` | Six HC-SR04 distances — **off by default** |
 | `/pit_obstacles` | `sensor_msgs/PointCloud2` | IR drop-off marks — **off by default** |
 
@@ -135,6 +137,30 @@ right_pwm = linear_x + angular_z × (wheel_separation / 2)
 
 - `wheel_separation` = 0.35 m, `max_speed` = 1.0 m/s, `max_pwm` = 30, `min_pwm` = 20 (deadband clamp)
 - Sent to Arduino as `<L,R>\n`
+
+**Live drive speed — `/robot/speed`**
+
+Publish a PWM magnitude to retune the robot's speed while it is running. One value
+governs every drive path:
+
+| Path | How it picks the value up |
+|------|---------------------------|
+| Nav2 / web teleop (`/cmd_vel`) | `max_pwm` is the ceiling velocities scale into |
+| `FORWARD` / `BACKWARD` / `LEFT` / `RIGHT` shortcuts | drive at `max_pwm` |
+| Bluetooth handset (HC-05) | bridge mirrors the value to the Mega as `<SPD:n>` |
+
+Bluetooth is included because that path never reaches the Pi — the Mega services the
+HC-05 on its own, so the bridge pushes the value down to keep the two in step.
+
+Clamped to `[min_pwm, pwm_limit]` (`pwm_limit` defaults to 255, the physical maximum;
+lower it to cap what the web slider can ask for). The bridge sends the configured
+`max_pwm` at startup, so the robot and every UI begin at the value in the launch file.
+`/robot/speed/state` reports the result, which is what the web slider tracks.
+
+```bash
+ros2 topic pub --once /robot/speed std_msgs/Int32 "{data: 80}"
+ros2 topic echo /robot/speed/state
+```
 
 **`/robot/body/command` accepted strings**
 

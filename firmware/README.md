@@ -116,6 +116,7 @@ Two links: `Serial` (USB, 115200) to the Pi/ROS2, and `Serial3` (9600) to the HC
 | Command | Meaning |
 |---------|---------|
 | `<L,R>` | Motor PWM, e.g. `<100,80>` (-255..255 each) |
+| `<SPD:120>` | Bluetooth handset speed (0–255). Pi-driven motion is already scaled on the Pi, so this only affects HC-05 driving |
 | `<NOD>` `<SHAKE>` `<EBLINK>` `<CENTER>` | Animations |
 | `<WAVE:L>` `<WAVE:R>` | Wave a hand — shoulder lifts, elbow holds, wrist flicks |
 | `<HOME>` `<HAND_UP>` `<HAND_DOWN>` | Arm poses (synchronized) |

@@ -136,6 +136,13 @@ one line of HTML with no JavaScript:
 | `data-action="stop"` | One of `connect`, `disconnect`, `stop`, `cancel`, `go`, `zoom-in`, `zoom-out`, `fit`, `fullscreen`. |
 | `data-lumi="rooms"` | A `<select>` populated with destinations. Add `data-autogo` to navigate on change instead of requiring a separate send button. |
 | `data-lumi="room-buttons"` | A container filled with one button per destination. |
+| `data-lumi="motor-power"` | A `range` input that retunes the robot's PWM ceiling on `/robot/speed`. Publishes on release, and syncs itself from `/robot/speed/state`, so it shows the robot's real speed rather than the markup default. Pair with `data-lumi="motor-power-value"` and `data-lumi="motor-power-pct"` read-outs. |
+
+Note the difference between the two kinds of speed control. `lin-speed` and
+`ang-speed` only shape the `Twist` that *this page* sends, so they affect the
+on-screen drive pad and nothing else. `motor-power` changes the PWM ceiling on the
+robot, which also governs Nav2 goals, the voice shortcuts and the Bluetooth handset —
+so it is deliberately absent from the kiosk layout, where the public can reach it.
 
 The map reads its colours from the CSS custom properties `--accent`, `--green`,
 `--dim` and `--text`, so it themes itself to whichever layout it is in.

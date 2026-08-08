@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, HistoryPolicy, DurabilityPolicy
 from geometry_msgs.msg import Twist
-from std_msgs.msg import String, Header
+from std_msgs.msg import String, Header, Int32
 from sensor_msgs.msg import Range, PointCloud2
 from sensor_msgs_py import point_cloud2
 import serial
@@ -48,6 +49,9 @@ class ArduinoBridge(Node):
         self.max_speed        = self.declare_parameter('max_speed', 1.0).value
         self.max_pwm          = self.declare_parameter('max_pwm', 30).value
         self.min_pwm          = self.declare_parameter('min_pwm', 20).value
+        # Ceiling for live speed changes on /robot/speed. 255 is the physical PWM
+        # limit; lower it to stop the web slider from ever asking for more.
+        self.pwm_limit        = self.declare_parameter('pwm_limit', 255).value
         # Ultrasonic + IR pit telemetry is off by default: both produced frequent
         # false positives indoors and Nav2 now plans on the LiDAR alone. Launch
         # with publish_sensors:=true to stream them again for debugging.
@@ -75,6 +79,21 @@ class ArduinoBridge(Node):
         self.create_subscription(
             String, '/robot/body/command', self.body_cb,    10
         )
+        self.create_subscription(
+            Int32,  '/robot/speed',        self.speed_cb,   10
+        )
+
+        # ── Live speed state ──
+        # Latched so `ros2 topic echo` and any native subscriber see the current
+        # value straight away. rosbridge subscribes with volatile QoS and would
+        # miss that stored sample, so the timer below republishes for the web UI.
+        self.speed_state_pub = self.create_publisher(
+            Int32, '/robot/speed/state',
+            qos_profile=QoSProfile(depth=1,
+                                   history=HistoryPolicy.KEEP_LAST,
+                                   durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        )
+        self.create_timer(2.0, self.publish_speed_state)
 
         # ── Sensor publishers (telemetry from the Arduino) ──
         self.us_pubs = {}
@@ -88,6 +107,10 @@ class ArduinoBridge(Node):
 
         # ── Serial read loop (~20 Hz) — parses telemetry lines ──
         self.create_timer(0.05, self.read_serial)
+
+        # Push the configured default down to the Mega so the Bluetooth handset
+        # starts at the same speed as ROS instead of the sketch's own default.
+        self.set_speed(self.max_pwm, 'startup default')
 
         self.get_logger().info(
             'Bridge V2 ready. Ultrasonic/IR telemetry '
@@ -103,6 +126,44 @@ class ArduinoBridge(Node):
         self.tx(f'<{lp},{rp}>\n')
         # High-rate stream → debug only, so it doesn't flood the logs.
         self.get_logger().debug(f'Nav2 motors: L={lp} R={rp}')
+
+    # ── SPEED → live PWM ceiling for every drive path ────────
+    def speed_cb(self, msg):
+        self.set_speed(msg.data, '/robot/speed')
+
+    def set_speed(self, pwm, source):
+        """Retune the drive speed for Nav2, the web/voice shortcuts and Bluetooth.
+
+        max_pwm is what cmd_vel_cb scales into and what the FORWARD/BACKWARD/LEFT/
+        RIGHT shortcuts use, so changing it here covers everything the Pi drives.
+        Bluetooth never reaches the Pi — the Mega handles the HC-05 on its own — so
+        the value is mirrored down the serial link as <SPD:n> to keep the two in step.
+        """
+        try:
+            requested = int(pwm)
+        except (TypeError, ValueError):
+            self.get_logger().warn(f'Ignoring non-integer speed: {pwm!r}')
+            return
+
+        # Floor at min_pwm: below the deadband every command would be boosted back
+        # up to it anyway, so a lower ceiling would silently stop meaning anything.
+        clamped = max(self.min_pwm, min(self.pwm_limit, requested))
+        if clamped != requested:
+            self.get_logger().warn(
+                f'Speed {requested} outside [{self.min_pwm}, {self.pwm_limit}] '
+                f'- clamped to {clamped}'
+            )
+
+        if clamped == self.max_pwm and source != 'startup default':
+            return
+
+        self.max_pwm = clamped
+        self.tx(f'<SPD:{clamped}>\n')
+        self.publish_speed_state()
+        self.get_logger().info(f'Drive speed now {clamped} PWM (via {source})')
+
+    def publish_speed_state(self):
+        self.speed_state_pub.publish(Int32(data=int(self.max_pwm)))
 
     # ── BODY COMMAND → servos or motors ──────────────────────
     def body_cb(self, msg):

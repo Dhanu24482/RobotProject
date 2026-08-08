@@ -265,6 +265,28 @@ check('offline banner injected', function () {
   var b = __body.children[__body.children.length - 1];
   return b && b.style.cssText && b.style.display === 'flex' ? 'shown' : 'MISSING';
 });
+check('speed slider bound', function () {
+  var s = document.querySelectorAll('[data-lumi="motor-power"]')[0];
+  if (!s) return 'n/a (layout has no speed slider)';
+  var onInput  = (s.listeners.input  || []).length;
+  var onChange = (s.listeners.change || []).length;
+  return onInput && onChange ? 'input+change' : 'MISSING (input=' + onInput
+    + ' change=' + onChange + ')';
+});
+check('speed read-out follows the thumb', function () {
+  var s = document.querySelectorAll('[data-lumi="motor-power"]')[0];
+  if (!s) return 'n/a';
+  s.value = '95';
+  s.fire('input');
+  var v = document.querySelectorAll('[data-lumi="motor-power-value"]')[0];
+  return v ? v.textContent : 'no read-out element';
+});
+check('speed release publishes (offline -> refused, no throw)', function () {
+  var s = document.querySelectorAll('[data-lumi="motor-power"]')[0];
+  if (!s) return 'n/a';
+  s.fire('change');
+  return 'handled';
+});
 check('canvas pointer goal', function () {
   var c = document.getElementById('mapCanvas');
   if (!c) return 'no canvas';

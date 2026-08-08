@@ -14,6 +14,8 @@
  *    Action    <button data-action="connect"> connect/disconnect/stop/cancel/zoom/fit
  *    Rooms UI  <select data-lumi="rooms">     auto-populated with destinations
  *              <div data-lumi="room-buttons"> auto-filled with one button per room
+ *    Speed     <input data-lumi="motor-power"> drag to retune the robot's PWM
+ *                                             ceiling (Nav2, voice and Bluetooth)
  *
  *  Every data-lumi field is optional: a layout renders only what it wants and
  *  missing fields are skipped silently.
@@ -262,7 +264,14 @@ function setupTopics() {
   pubs.body    = new ROSLIB.Topic({ ros: ros, name: '/robot/body/command', messageType: 'std_msgs/String' });
   pubs.emotion = new ROSLIB.Topic({ ros: ros, name: '/robot/emotion',      messageType: 'std_msgs/String' });
   pubs.save    = new ROSLIB.Topic({ ros: ros, name: '/save_location',      messageType: 'std_msgs/String' });
+  pubs.speed   = new ROSLIB.Topic({ ros: ros, name: '/robot/speed',        messageType: 'std_msgs/Int32' });
   setField('body', 'ok', 'ok');
+
+  // The bridge owns the real speed and republishes it every couple of seconds, so
+  // the slider shows what the robot is actually doing — including the configured
+  // default on first connect, and any change made from another tablet.
+  new ROSLIB.Topic({ ros: ros, name: '/robot/speed/state', messageType: 'std_msgs/Int32' })
+    .subscribe(function (msg) { showSpeed(msg.data); });
 
   new ROSLIB.Topic({ ros: ros, name: '/map', messageType: 'nav_msgs/OccupancyGrid', throttle_rate: 3000 })
     .subscribe(function (msg) {
@@ -677,6 +686,34 @@ function bodyCmd(cmd) {
   log('Body command: ' + cmd, 'i');
 }
 
+// ── Global drive speed ───────────────────────────────────────────────────────
+// Distinct from the lin-speed/ang-speed sliders, which only shape the Twist this
+// page sends. This sets the PWM ceiling on the robot itself, so it also governs
+// Nav2 goals, the voice shortcuts and the Bluetooth handset.
+
+var PWM_MAX = 255;
+
+function speedReadout(pwm) {
+  setField('motor-power-value', String(pwm));
+  setField('motor-power-pct', Math.round((pwm / PWM_MAX) * 100) + '%');
+}
+
+// Applies a value that came from the robot. Assigning .value does not fire input
+// or change events, so this cannot bounce back out as a new command.
+function showSpeed(pwm) {
+  var el = document.querySelector('[data-lumi="motor-power"]');
+  if (el) el.value = pwm;
+  speedReadout(pwm);
+}
+
+function setSpeed(pwm) {
+  if (!requireConnection()) return;
+  var v = Math.round(parseFloat(pwm));
+  pubs.speed.publish(new ROSLIB.Message({ data: v }));
+  log('Drive speed -> ' + v + ' PWM', 'i');
+  toast('Speed ' + v);
+}
+
 function setEmotion(name) {
   if (!requireConnection()) return;
   pubs.emotion.publish(new ROSLIB.Message({ data: name }));
@@ -808,6 +845,15 @@ function bindControls() {
     show();
   });
 
+  // Global drive speed. The read-out tracks the thumb, but the robot is only told
+  // on release — a drag would otherwise fire dozens of serial writes on the way.
+  var power = document.querySelector('[data-lumi="motor-power"]');
+  if (power) {
+    power.addEventListener('input',  function () { speedReadout(power.value); });
+    power.addEventListener('change', function () { setSpeed(power.value); });
+    speedReadout(power.value);
+  }
+
   var urlInput = document.querySelector('[data-lumi="url"]');
   if (urlInput) {
     urlInput.value = savedUrl() || defaultUrl();
@@ -885,6 +931,7 @@ global.LUMI = {
   startMove: startMove,
   stopMove: stopMove,
   bodyCmd: bodyCmd,
+  setSpeed: setSpeed,
   setEmotion: setEmotion,
   setMode: setMode,
   zoom: zoom,
