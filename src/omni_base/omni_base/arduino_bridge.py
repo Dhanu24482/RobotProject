@@ -61,6 +61,15 @@ class ArduinoBridge(Node):
         # with publish_sensors:=true to stream them again for debugging.
         self.publish_sensors  = self.declare_parameter('publish_sensors', False).value
         self.is_driving       = False
+        # Bumped by every STOP and every new pulse so a superseded drive thread
+        # knows to quit, and so a STOP that arrives before the thread has even
+        # started is not lost.
+        self._drive_gen       = 0
+        self._drive_lock      = threading.Lock()
+        # After a STOP, ignore /cmd_vel briefly: Nav2 messages already in flight
+        # (controller / velocity smoother) would otherwise restart the wheels.
+        self.stop_holdoff_sec = self.declare_parameter('stop_holdoff_sec', 0.5).value
+        self._ignore_cmd_vel_until = 0.0
 
         # Serial write lock — traffic is now bidirectional and writes come from
         # both the executor thread (callbacks) and the drive() daemon thread.
@@ -123,6 +132,8 @@ class ArduinoBridge(Node):
 
     # ── CMD_VEL → motors (Nav2 autonomous navigation) ────────
     def cmd_vel_cb(self, msg):
+        if time.time() < self._ignore_cmd_vel_until:
+            return
         l = msg.linear.x  - (msg.angular.z * self.wheel_separation / 2.0)
         r = msg.linear.x  + (msg.angular.z * self.wheel_separation / 2.0)
         lp = self.scale_pwm(l)
@@ -209,7 +220,10 @@ class ArduinoBridge(Node):
             self.get_logger().info('RIGHT started')
 
         elif cmd == 'STOP':
-            self.is_driving = False
+            with self._drive_lock:
+                self.is_driving = False
+                self._drive_gen += 1
+            self._ignore_cmd_vel_until = time.time() + self.stop_holdoff_sec
             self.tx('<0,0>\n')
             self.get_logger().info('STOP sent')
 
@@ -217,7 +231,7 @@ class ArduinoBridge(Node):
         elif cmd in ('NOD','SHAKE','EBLINK','EBLINK2','CENTER','WAVE:L','WAVE:R',
                      'LOOK:L','LOOK:R','LOOK:C',
                      'HOME','ARM_HOME','HAND_UP','HAND_DOWN',
-                     'PULL_UP','PULL_DOWN','SALUTE','GOODBYE',
+                     'SALUTE','GOODBYE',  # PULL_UP/PULL_DOWN disabled: arms hit the torso
                      'WRIST:UP','WRIST:DOWN','WRIST:CENTER','WRIST:TEST') \
           or cmd.startswith(('HP:','EL:','ER:','EY:','HL:','HR:','HANDS:','LOOK:',
                              'WL:','WR:','WRISTS:')):
@@ -229,17 +243,27 @@ class ArduinoBridge(Node):
 
     # ── Drive for duration then stop ──────────────────────────
     def drive(self, left_pwm, right_pwm, duration):
-        if self.is_driving:
-            return
-        def _go():
+        with self._drive_lock:
+            if self.is_driving:
+                return
+            # Claim the slot BEFORE the thread starts: a STOP arriving in the gap
+            # must be able to cancel this pulse (it used to be lost).
             self.is_driving = True
+            self._drive_gen += 1
+            gen = self._drive_gen
+
+        def _go():
             cmd = f'<{left_pwm},{right_pwm}>\n'
             end = time.time() + duration
-            while time.time() < end and self.is_driving:
+            while time.time() < end and self._drive_gen == gen:
                 self.tx(cmd)
                 time.sleep(0.1)   # 10Hz keeps Arduino watchdog happy
+            # Always finish with a stop: if STOP landed while a write was in flight,
+            # this guarantees the last thing the motors hear is <0,0>.
             self.tx('<0,0>\n')
-            self.is_driving = False
+            with self._drive_lock:
+                if self._drive_gen == gen:
+                    self.is_driving = False
             self.get_logger().info('Drive complete.')
         threading.Thread(target=_go, daemon=True).start()
 

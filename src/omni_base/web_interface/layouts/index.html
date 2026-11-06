@@ -1,163 +1,102 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="auto">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
-<title>LUMI · Choose a Layout</title>
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-:root {
-  --bg:#0b1120; --card:#151d31; --card2:#1d2743; --border:#2a3552;
-  --accent:#38bdf8; --green:#22c55e; --text:#f1f5f9; --dim:#8595b0;
-}
-* { margin:0; padding:0; box-sizing:border-box; }
-body {
-  background:var(--bg); color:var(--text); font-family:'Inter',system-ui,sans-serif;
-  min-height:100vh; padding:40px 24px;
-}
-.wrap { max-width:1180px; margin:0 auto; }
-h1 { font-size:32px; font-weight:800; letter-spacing:-.6px; margin-bottom:8px; }
-h1 span { color:var(--accent); }
-.sub { color:var(--dim); font-size:15px; margin-bottom:12px; line-height:1.6; }
-.note {
-  background:var(--card); border:1px solid var(--border); border-left:3px solid var(--accent);
-  border-radius:10px; padding:14px 18px; font-size:13.5px; color:var(--dim);
-  line-height:1.7; margin-bottom:32px;
-}
-.note b { color:var(--text); }
-.note code { background:var(--card2); padding:2px 7px; border-radius:5px; font-size:12.5px; color:var(--accent); }
-
-.grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(330px,1fr)); gap:20px; }
-.card {
-  background:var(--card); border:1px solid var(--border); border-radius:18px;
-  overflow:hidden; text-decoration:none; color:inherit; display:flex; flex-direction:column;
-  transition:.2s;
-}
-.card:hover { border-color:var(--accent); transform:translateY(-3px); }
-.thumb { height:150px; background:var(--card2); position:relative; overflow:hidden; border-bottom:1px solid var(--border); }
-.card-body { padding:18px; flex:1; display:flex; flex-direction:column; }
-.card h2 { font-size:19px; font-weight:700; margin-bottom:6px; }
-.card p { font-size:13.5px; color:var(--dim); line-height:1.65; flex:1; }
-.tag {
-  display:inline-block; margin-top:14px; font-size:11px; font-weight:600;
-  text-transform:uppercase; letter-spacing:1px; padding:5px 12px; border-radius:20px;
-  background:rgba(56,189,248,.14); color:var(--accent); align-self:flex-start;
-}
-.tag.best { background:rgba(34,197,94,.15); color:var(--green); }
-
-/* Tiny abstract previews built from divs */
-.p { position:absolute; background:#38bdf8; opacity:.85; border-radius:3px; }
-.pm { position:absolute; background:#0a1020; }
-.pd { position:absolute; background:#2a3552; border-radius:3px; }
-</style>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<meta name="color-scheme" content="dark light"/>
+<title>Lumi · Choose a layout</title>
+<link rel="stylesheet" href="../lumi-ui.css"/>
+<link rel="stylesheet" href="picker.css"/>
+<script src="picker.js"></script>
 </head>
 <body>
 <div class="wrap">
-  <h1>LU<span>MI</span> Control Panel Layouts</h1>
-  <p class="sub">Six takes on the same control panel. Every one is fully functional and shares identical logic, so pick purely on feel.</p>
 
-  <div class="note">
-    <b>Before you open one:</b> the robot must be running with the web bridge enabled &mdash;
-    <code>ros2 launch omni_base navigation.launch.py use_voice:=true use_web:=true</code><br/>
-    On first load, enter the Pi's address as <code>ws://&lt;pi-ip&gt;:9090</code> and press Connect.
-    The address is remembered on that tablet and reconnects by itself on every later visit.
-  </div>
+  <header class="hero">
+    <div class="hero-top">
+      <span class="brand"><i class="brand-eyes"></i>Lumi</span>
+      <button class="icon-btn" data-action="fullscreen" aria-label="Toggle fullscreen" title="Fullscreen (F)"><svg class="fs-ico" viewBox="0 0 24 24" aria-hidden="true"><path class="fs-in" d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/><path class="fs-out" d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg></button>
+    </div>
+    <h1>How do you want to <em>drive</em>?</h1>
+    <p>Six ways to see the same robot. They all share one engine, so every layout stays in step. Pick the one that fits the screen and the person using it.</p>
+  </header>
 
-  <div class="grid">
+  <main class="cards">
 
-    <a class="card" href="kiosk.html">
-      <div class="thumb">
-        <div class="pd" style="left:0;top:0;right:0;height:24px;"></div>
-        <div class="p" style="left:14px;top:38px;width:78px;height:44px;"></div>
-        <div class="p" style="left:100px;top:38px;width:78px;height:44px;"></div>
-        <div class="p" style="left:14px;top:90px;width:78px;height:44px;"></div>
-        <div class="p" style="left:100px;top:90px;width:78px;height:44px;"></div>
-        <div class="pm" style="right:14px;top:38px;width:96px;height:60px;border-radius:5px;"></div>
-        <div class="pd" style="right:14px;top:106px;width:96px;height:28px;"></div>
-      </div>
-      <div class="card-body">
-        <h2>Kiosk</h2>
-        <p>Enormous destination tiles, plain wording, and a full-width stop button. Technical controls are tucked behind a settings gear so a visitor cannot wander into teleop.</p>
-        <span class="tag best">Best for public tablets</span>
-      </div>
+    <a class="layout-card" href="kiosk.html" data-layout="kiosk">
+      <svg class="thumb" viewBox="0 0 160 100" aria-hidden="true">
+        <rect class="s-bg" width="160" height="100"/>
+        <rect class="s-card" x="10" y="26" width="46" height="26" rx="5"/><rect class="s-card" x="60" y="26" width="46" height="26" rx="5"/>
+        <rect class="s-card" x="10" y="56" width="46" height="26" rx="5"/><rect class="s-card" x="60" y="56" width="46" height="26" rx="5"/>
+        <rect class="s-acc" x="10" y="10" width="40" height="7" rx="3.5"/>
+        <rect class="s-map" x="114" y="10" width="36" height="34" rx="5"/>
+        <rect class="s-card" x="114" y="48" width="36" height="14" rx="4"/><rect class="s-red" x="114" y="70" width="36" height="16" rx="5"/>
+      </svg>
+      <div><div class="name">Kiosk</div><p class="why">A public tablet. Huge destination tiles, plain language and one big stop button. Staff settings hide behind a gear.</p></div>
+      <span class="go">Open Kiosk</span>
     </a>
 
-    <a class="card" href="immersive.html">
-      <div class="thumb">
-        <div class="pm" style="inset:0;"></div>
-        <div class="pd" style="left:50%;top:10px;transform:translateX(-50%);width:170px;height:22px;border-radius:20px;"></div>
-        <div class="pd" style="right:10px;top:44px;width:34px;height:78px;"></div>
-        <div class="p" style="left:50%;bottom:12px;transform:translateX(-50%);width:210px;height:40px;"></div>
-      </div>
-      <div class="card-body">
-        <h2>Immersive</h2>
-        <p>Your DeepSeek design, now wired up. Edge-to-edge map with frosted glass panels floating over it. The most striking option, and the map gets the most room.</p>
-        <span class="tag">Your original design</span>
-      </div>
+    <a class="layout-card" href="immersive.html" data-layout="immersive">
+      <svg class="thumb" viewBox="0 0 160 100" aria-hidden="true">
+        <rect class="s-map" width="160" height="100"/><rect class="s-free" x="28" y="26" width="86" height="44" rx="4"/>
+        <rect class="s-glass" x="8" y="7" width="144" height="13" rx="6.5"/>
+        <rect class="s-glass" x="136" y="30" width="16" height="40" rx="6"/>
+        <rect class="s-glass" x="8" y="76" width="26" height="17" rx="5"/><rect class="s-glass" x="38" y="76" width="26" height="17" rx="5"/>
+        <rect class="s-glass" x="68" y="76" width="30" height="17" rx="5"/><rect class="s-glass" x="102" y="76" width="30" height="17" rx="5"/>
+      </svg>
+      <div><div class="name">Immersive</div><p class="why">The map fills the screen and every control floats above it on frosted glass. Most room for the map.</p></div>
+      <span class="go">Open Immersive</span>
     </a>
 
-    <a class="card" href="console.html">
-      <div class="thumb">
-        <div class="pd" style="left:0;top:0;right:0;height:18px;"></div>
-        <div class="pd" style="left:0;top:22px;width:64px;bottom:16px;"></div>
-        <div class="pm" style="left:68px;top:22px;right:56px;bottom:16px;"></div>
-        <div class="pd" style="right:0;top:22px;width:52px;bottom:16px;"></div>
-        <div class="pd" style="left:0;bottom:0;right:0;height:12px;"></div>
-      </div>
-      <div class="card-body">
-        <h2>Console</h2>
-        <p>Three columns with everything visible at once: modes, teleop, topic health, and a live log. Refined version of the original interface, now touch-capable.</p>
-        <span class="tag">Best for engineers</span>
-      </div>
+    <a class="layout-card" href="console.html" data-layout="console">
+      <svg class="thumb" viewBox="0 0 160 100" aria-hidden="true">
+        <rect class="s-bg" width="160" height="100"/><rect class="s-card" width="160" height="10"/><rect class="s-card" y="92" width="160" height="8"/>
+        <rect class="s-card" x="6" y="15" width="38" height="72" rx="4"/><rect class="s-map" x="48" y="15" width="64" height="72" rx="4"/><rect class="s-free" x="58" y="34" width="40" height="32" rx="3"/>
+        <rect class="s-card" x="116" y="15" width="38" height="72" rx="4"/>
+        <rect class="s-acc" x="10" y="20" width="30" height="7" rx="3"/><rect class="s-line" x="120" y="22" width="26" height="3"/><rect class="s-line" x="120" y="30" width="20" height="3"/><rect class="s-line" x="120" y="38" width="24" height="3"/>
+      </svg>
+      <div><div class="name">Console</div><p class="why">For engineers. Controls, map and live telemetry side by side, with a status footer and an event log.</p></div>
+      <span class="go">Open Console</span>
     </a>
 
-    <a class="card" href="split.html">
-      <div class="thumb">
-        <div class="pm" style="left:0;top:0;bottom:0;right:118px;"></div>
-        <div class="pd" style="right:0;top:0;bottom:0;width:114px;"></div>
-        <div class="p" style="right:12px;top:32px;width:90px;height:5px;"></div>
-        <div class="p" style="right:12px;top:46px;width:90px;height:22px;opacity:.4;"></div>
-        <div class="p" style="right:12px;top:74px;width:90px;height:22px;opacity:.4;"></div>
-        <div class="p" style="right:12px;top:102px;width:90px;height:22px;opacity:.4;"></div>
-      </div>
-      <div class="card-body">
-        <h2>Split</h2>
-        <p>Map on the left, a tabbed panel on the right grouping Go, Drive, Express, and Setup. Keeps the screen calm while still exposing every control within one tap.</p>
-        <span class="tag">Balanced</span>
-      </div>
+    <a class="layout-card" href="split.html" data-layout="split">
+      <svg class="thumb" viewBox="0 0 160 100" aria-hidden="true">
+        <rect class="s-bg" width="160" height="100"/>
+        <rect class="s-map" x="0" y="0" width="96" height="100"/><rect class="s-free" x="14" y="26" width="64" height="44" rx="3"/>
+        <rect class="s-card" x="104" y="8" width="48" height="10" rx="5"/><rect class="s-acc" x="106" y="10" width="14" height="6" rx="3"/>
+        <rect class="s-card" x="104" y="24" width="48" height="12" rx="4"/><rect class="s-card" x="104" y="40" width="48" height="12" rx="4"/><rect class="s-card" x="104" y="56" width="48" height="12" rx="4"/>
+        <rect class="s-red" x="104" y="80" width="48" height="12" rx="5"/>
+      </svg>
+      <div><div class="name">Split</div><p class="why">A balance. The map on the left, a tabbed panel on the right (Go, Drive, Express, Setup).</p></div>
+      <span class="go">Open Split</span>
     </a>
 
-    <a class="card" href="dashboard.html">
-      <div class="thumb">
-        <div class="pd" style="left:0;top:0;right:0;height:18px;"></div>
-        <div class="pm" style="left:12px;top:28px;width:120px;height:100px;border-radius:5px;"></div>
-        <div class="pd" style="left:140px;top:28px;width:74px;height:47px;"></div>
-        <div class="pd" style="left:222px;top:28px;width:74px;height:47px;"></div>
-        <div class="pd" style="left:140px;top:81px;width:156px;height:47px;"></div>
-      </div>
-      <div class="card-body">
-        <h2>Dashboard</h2>
-        <p>Everything as cards on a responsive grid, and the only layout that follows the tablet's light/dark setting. Reads well in a bright lobby.</p>
-        <span class="tag">Light mode support</span>
-      </div>
+    <a class="layout-card" href="dashboard.html" data-layout="dashboard">
+      <svg class="thumb" viewBox="0 0 160 100" aria-hidden="true">
+        <rect class="s-bg" width="160" height="100"/><rect class="s-card" width="160" height="10"/>
+        <rect class="s-map" x="8" y="16" width="86" height="46" rx="5"/><rect class="s-free" x="24" y="28" width="52" height="22" rx="3"/>
+        <rect class="s-card" x="100" y="16" width="52" height="21" rx="5"/><rect class="s-card" x="100" y="41" width="52" height="21" rx="5"/>
+        <rect class="s-card" x="8" y="68" width="40" height="26" rx="5"/><rect class="s-card" x="52" y="68" width="40" height="26" rx="5"/><rect class="s-card" x="96" y="68" width="56" height="26" rx="5"/>
+        <rect class="s-acc" x="12" y="72" width="18" height="4" rx="2"/>
+      </svg>
+      <div><div class="name">Dashboard</div><p class="why">A bright card grid for well-lit rooms. The only layout that follows the device's light or dark setting.</p></div>
+      <span class="go">Open Dashboard</span>
     </a>
 
-    <a class="card" href="minimal.html">
-      <div class="thumb">
-        <div class="pm" style="left:0;top:0;right:0;bottom:44px;"></div>
-        <div class="pd" style="left:50%;top:12px;transform:translateX(-50%);width:120px;height:18px;border-radius:20px;"></div>
-        <div class="pd" style="left:0;bottom:0;right:0;height:40px;"></div>
-        <div class="p" style="left:12px;bottom:10px;width:60px;height:20px;"></div>
-        <div class="p" style="left:80px;bottom:10px;width:100px;height:20px;opacity:.5;"></div>
-      </div>
-      <div class="card-body">
-        <h2>Minimal</h2>
-        <p>Pure black, one bottom bar, nothing else. Almost the whole screen is map. The calmest option and the easiest to read from across a room.</p>
-        <span class="tag">Distraction free</span>
-      </div>
+    <a class="layout-card" href="minimal.html" data-layout="minimal">
+      <svg class="thumb" viewBox="0 0 160 100" aria-hidden="true">
+        <rect width="160" height="100" fill="#000"/>
+        <rect class="s-map" x="0" y="0" width="160" height="82"/><rect class="s-free" x="38" y="22" width="84" height="38" rx="3"/>
+        <rect class="s-card" x="0" y="82" width="160" height="18"/>
+        <rect class="s-line" x="8" y="87" width="34" height="8" rx="4"/><rect class="s-line" x="52" y="87" width="40" height="8" rx="4"/><rect class="s-red" x="136" y="86" width="16" height="10" rx="4"/>
+      </svg>
+      <div><div class="name">Minimal</div><p class="why">Distraction-free. Pure black, a single bottom bar, everything else is map. Good for OLED screens.</p></div>
+      <span class="go">Open Minimal</span>
     </a>
 
-  </div>
+  </main>
+
+  <label class="remember"><input type="checkbox" id="remember"/> Open the layout I pick automatically on this device</label>
 </div>
 </body>
 </html>

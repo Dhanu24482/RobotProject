@@ -1,0 +1,46 @@
+/* Console layout — everything at once: controls | map | telemetry, with a status footer. */
+
+html, body { height: 100%; }
+body {
+  display: grid; height: 100vh; height: 100dvh; overflow: hidden;
+  grid-template-columns: 330px minmax(0, 1fr) 300px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas: "top top top" "side stage info" "foot foot foot";
+}
+
+.top { grid-area: top; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 10px 18px; padding-top: calc(10px + env(safe-area-inset-top));
+  background: var(--surface); border-bottom: 1px solid var(--line); }
+.top .url { width: 270px; }
+
+.side, .info { overflow: auto; padding: 16px; display: grid; gap: 18px; align-content: start; background: var(--bg-2); }
+.side { grid-area: side; border-right: 1px solid var(--line); }
+.info { grid-area: info; border-left: 1px solid var(--line); }
+.block { display: grid; gap: 10px; }
+.block.hl { padding: 12px; border: 1px solid var(--accent-line); border-radius: var(--r); background: var(--accent-soft); }
+
+.stage { grid-area: stage; position: relative; min-width: 0; }
+.stage .map-stage { position: absolute; inset: 0; min-height: 0; }
+.hud { position: absolute; left: 12px; top: 12px; display: flex; flex-wrap: wrap; gap: 6px; max-width: calc(100% - 80px); pointer-events: none; }
+.hud .tag {
+  display: inline-flex; gap: 8px; align-items: baseline; padding: 6px 11px; border-radius: 999px;
+  background: var(--glass); border: 1px solid var(--line-2); font: 500 11.5px var(--font); color: var(--dim);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+}
+.hud .tag b { font: 500 11.5px var(--mono); color: var(--text); }
+
+.foot { grid-area: foot; display: flex; align-items: center; gap: 22px; flex-wrap: wrap; padding: 9px 18px; padding-bottom: calc(9px + env(safe-area-inset-bottom));
+  background: var(--surface); border-top: 1px solid var(--line); font-size: 12px; color: var(--dim); }
+.foot b { font: 500 12px var(--mono); color: var(--text); margin-left: 6px; }
+.foot .right { margin-left: auto; display: flex; gap: 8px; }
+
+@media (max-width: 1180px) {
+  body { grid-template-columns: 310px minmax(0, 1fr); grid-template-areas: "top top" "side stage" "foot foot"; }
+  .info { display: none; }
+}
+@media (max-width: 760px) {
+  body { display: block; height: auto; overflow: auto; }
+  .stage { height: 52vh; min-height: 300px; }
+  .side, .info { border: 0; }
+  .info { display: grid; }
+  .top .url { flex: 1 1 100%; width: 100%; order: 9; }
+}

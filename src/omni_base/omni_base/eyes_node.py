@@ -3,8 +3,15 @@
 Eyes Node — Dual ILI9341 TFT emotion display for Lumi robot.
 
 Drives two 2.4" ILI9341 320x240 displays connected to the Raspberry Pi's
-hardware SPI0 bus. Subscribes to /robot/emotion (std_msgs/String) and renders
-the matching expression on both eyes simultaneously.
+hardware SPI0 bus. Subscribes to /robot/emotion (std_msgs/String) and animates
+the matching expression on both eyes (see eye_art.py for the drawing and the
+animation rules).
+
+Expressions: neutral happy sad angry surprised  |  love (heart eyes) excited (star eyes) dizzy
+             sleepy wink  |  'blink' = one blink, keeping the current expression.
+Changing expression is a quick blink with a colour fade; the eyes also blink on their own every
+few seconds. Only the round area visible through the face holes (180x180 centred) is ever drawn
+or sent to the panels.
 
 Hardware (shared SPI bus):
   VCC  -> Pin 1  (3.3V)          GND   -> Pin 6 (GND)
@@ -26,6 +33,7 @@ never breaks.
 """
 import threading
 import time
+from collections import deque
 
 import rclpy
 from rclpy.node import Node
@@ -41,20 +49,25 @@ try:
     import board
     import digitalio
     import adafruit_rgb_display.ili9341 as ili9341
-    from PIL import Image, ImageDraw
+    from PIL import Image
+    from omni_base import eye_art as art
     _HW_AVAILABLE = True
 except Exception as _e:
     _HW_IMPORT_ERROR = str(_e)  # captured for logging in __init__
 
-# ── Constants (from PDF final code) ──────────────────────────────────────────
+# ── Constants ────────────────────────────────────────────────────────────────
 BAUDRATE  = 64000000
 ROTATION  = 90
-BG_COLOR  = (0, 0, 0)
-EYE_COLOR = (0, 150, 255)
 
 # Display dimensions in landscape (rotation=90)
 WIDTH  = 320
 HEIGHT = 240
+# The round hole: a 180x180 square centred on the panel (landscape coordinates).
+HOLE_X, HOLE_Y = 70, 30
+# With rotation=90 the driver rotates every picture a quarter turn into the panel's native portrait
+# frame, so the same square sits at native (HOLE_Y, WIDTH - HOLE_X - SIZE) - verified pixel-for-pixel
+# in test/test_eye_art.py. Sending only that square is ~2.4x less SPI traffic than a full frame.
+NATIVE_X, NATIVE_Y = 30, 70
 
 
 class EyesNode(Node):
@@ -64,11 +77,21 @@ class EyesNode(Node):
         emotion_topic = self.declare_parameter('emotion_topic', '/robot/emotion').value
         self._rotation  = self.declare_parameter('rotation',  ROTATION).value
         self._baudrate  = self.declare_parameter('baudrate',  BAUDRATE).value
+        idle_blink      = self.declare_parameter('idle_blink',  True).value     # blink on its own every few seconds
+        transitions     = self.declare_parameter('transitions', True).value     # blink + colour fade when changing
+        self._fps       = float(self.declare_parameter('fps', 15.0).value)      # while something is moving
+        self._crop      = bool(self.declare_parameter('send_hole_only', True).value)
 
         self._left_eye  = None
         self._right_eye = None
         self._hw        = False
-        self._last_emotion = 'neutral'
+        self._lock      = threading.Lock()
+        self._wake      = threading.Event()
+        self._running   = True
+        self._thread    = None
+        self._push_ms   = deque(maxlen=60)
+        self._last_err  = 0.0
+        self._last_stat = 0.0
 
         if _HW_AVAILABLE:
             self._init_displays()
@@ -78,10 +101,15 @@ class EyesNode(Node):
                 'Running headless — emotions will be logged only.'
             )
 
+        self._anim = art.EyeAnimator(now=time.monotonic(), emotion='neutral',
+                                     idle_blink=bool(idle_blink), transitions=bool(transitions)) if _HW_AVAILABLE else None
+
         self.create_subscription(String, emotion_topic, self._on_emotion, 10)
 
-        # Show neutral on startup
-        self._render('neutral')
+        if self._hw:
+            self._clear()      # whole panel black once; afterwards only the hole is ever redrawn
+            self._thread = threading.Thread(target=self._loop, daemon=True, name='eyes-anim')
+            self._thread.start()
         self.get_logger().info(f'eyes_node ready, subscribed to {emotion_topic}')
 
     # ── Hardware init ─────────────────────────────────────────────────────────
@@ -124,109 +152,74 @@ class EyesNode(Node):
     def _on_emotion(self, msg: String):
         name = msg.data.strip().lower()
         self.get_logger().info(f'eyes_node: emotion -> {name}')
-        if name == 'blink':
-            threading.Thread(target=self._blink_then_restore, daemon=True).start()
-        else:
-            self._last_emotion = name
-            self._render(name)
-
-    # ── Render dispatcher ─────────────────────────────────────────────────────
-
-    def _render(self, name: str):
         if not self._hw:
             return  # headless mode — no display hardware available
-        dispatch = {
-            'surprised': self._draw_surprised,
-            'happy':     self._draw_happy,
-            'neutral':   self._draw_neutral,
-            'angry':     self._draw_angry,
-            'sad':       self._draw_sad,
-        }
-        fn = dispatch.get(name)
-        if fn is None:
-            self.get_logger().warn(f'eyes_node: unknown emotion "{name}", ignoring.')
-            return
-        fn()
+        now = time.monotonic()
+        with self._lock:
+            if name == 'blink':
+                self._anim.blink(now)
+            elif art.canonical(name) is None:
+                self.get_logger().warn(f'eyes_node: unknown emotion "{name}", ignoring.')
+            else:
+                self._anim.request(name, now)
+        self._wake.set()
 
-    # ── Expression drawing ────────────────────────────────────────────────────
-    # All geometry ported verbatim from the PDF final robot_eyes.py (pages 11-12)
-    # with width=320, height=240 in landscape.
+    # ── animation loop (the only thread that ever touches the SPI bus) ─────────────────────────────────
 
-    def _new_frames(self):
-        """Return two blank (BG_COLOR) images and their draw handles."""
-        img_l  = Image.new('RGB', (WIDTH, HEIGHT), BG_COLOR)
-        img_r  = Image.new('RGB', (WIDTH, HEIGHT), BG_COLOR)
-        draw_l = ImageDraw.Draw(img_l)
-        draw_r = ImageDraw.Draw(img_r)
-        return img_l, img_r, draw_l, draw_r
+    def _loop(self):
+        period = 1.0 / max(1.0, self._fps)
+        while self._running:
+            t0 = time.monotonic()
+            with self._lock:
+                frame = self._anim.frame(t0)
+                busy = self._anim.busy()
+                idle_for = self._anim.seconds_until_idle_blink(t0)
+            if frame.dirty:
+                try:
+                    self._draw(frame)
+                except Exception as e:                       # an SPI hiccup must not kill the eyes
+                    if t0 - self._last_err > 5.0:
+                        self._last_err = t0
+                        self.get_logger().warn(f'eyes_node: display update failed: {e}')
+            if busy:
+                time.sleep(max(0.0, period - (time.monotonic() - t0)))
+            else:
+                self._wake.wait(timeout=min(0.5, idle_for))   # nothing moving: sleep until asked or time to blink
+                self._wake.clear()
+
+    def _draw(self, f):
+        sides = ('L', 'R') if f.emotion in art.ASYMMETRIC else ('L',)
+        imgs = {s: art.render(f.emotion, s, f.color, f.openness, f.t) for s in sides}
+        t0 = time.monotonic()
+        self._push(imgs['L'], imgs.get('R', imgs['L']))
+        self._push_ms.append((time.monotonic() - t0) * 1000.0)
+        if len(self._push_ms) == self._push_ms.maxlen and time.monotonic() - self._last_stat > 10.0:
+            self._last_stat = time.monotonic()
+            avg = sum(self._push_ms) / len(self._push_ms)
+            self.get_logger().debug(f'eyes_node: panel update takes {avg:.1f} ms on average')
 
     def _push(self, img_l, img_r):
-        """Send both frames to the physical displays (no-op if headless)."""
-        if not self._hw:
+        """Send the two pictures to the panels (only the round hole's square when possible)."""
+        if self._crop and self._rotation == 90:
+            self._left_eye.image(img_l, x=NATIVE_X, y=NATIVE_Y)
+            self._right_eye.image(img_r, x=NATIVE_X, y=NATIVE_Y)
             return
-        self._left_eye.image(img_l)
-        self._right_eye.image(img_r)
+        for eye, img in ((self._left_eye, img_l), (self._right_eye, img_r)):
+            full = Image.new('RGB', (WIDTH, HEIGHT), art.BG)
+            full.paste(img, (HOLE_X, HOLE_Y))
+            eye.image(full)
 
-    def _draw_surprised(self):
-        img_l, img_r, draw_l, draw_r = self._new_frames()
-        outer_box = [70, 30, 250, 210]
-        inner_box = [110, 70, 210, 170]
-        draw_l.ellipse(outer_box, fill=EYE_COLOR)
-        draw_l.ellipse(inner_box, fill=BG_COLOR)
-        draw_r.ellipse(outer_box, fill=EYE_COLOR)
-        draw_r.ellipse(inner_box, fill=BG_COLOR)
-        self._push(img_l, img_r)
+    def _clear(self):
+        black = Image.new('RGB', (WIDTH, HEIGHT), art.BG)
+        self._left_eye.image(black)
+        self._right_eye.image(black)
 
-    def _draw_happy(self):
-        img_l, img_r, draw_l, draw_r = self._new_frames()
-        outer_box = [70, 30, 250, 210]
-        mask_box  = [60, 60, 260, 260]   # shifted down -> hides bottom half -> upper crescent
-        draw_l.ellipse(outer_box, fill=EYE_COLOR)
-        draw_l.ellipse(mask_box,  fill=BG_COLOR)
-        draw_r.ellipse(outer_box, fill=EYE_COLOR)
-        draw_r.ellipse(mask_box,  fill=BG_COLOR)
-        self._push(img_l, img_r)
-
-    def _draw_neutral(self):
-        img_l, img_r, draw_l, draw_r = self._new_frames()
-        dash_box = [80, 100, 240, 140]
-        draw_l.rounded_rectangle(dash_box, radius=20, fill=EYE_COLOR)
-        draw_r.rounded_rectangle(dash_box, radius=20, fill=EYE_COLOR)
-        self._push(img_l, img_r)
-
-    def _draw_angry(self):
-        img_l, img_r, draw_l, draw_r = self._new_frames()
-        outer_box = [70, 30, 250, 210]
-        # Left eye: brow slashes down-right; Right eye: brow slashes down-left (mirrored)
-        l_mask = [(60, 30), (260, 30), (260, 140)]
-        r_mask = [(60, 30), (260, 30), (60, 140)]
-        draw_l.ellipse(outer_box, fill=EYE_COLOR)
-        draw_l.polygon(l_mask,    fill=BG_COLOR)
-        draw_r.ellipse(outer_box, fill=EYE_COLOR)
-        draw_r.polygon(r_mask,    fill=BG_COLOR)
-        self._push(img_l, img_r)
-
-    def _draw_sad(self):
-        """Lower crescent: BG mask shifted upward hides top half of the ellipse."""
-        img_l, img_r, draw_l, draw_r = self._new_frames()
-        outer_box = [70, 30, 250, 210]
-        mask_box  = [60, -20, 260, 180]   # shifted up -> hides top half -> lower crescent
-        draw_l.ellipse(outer_box, fill=EYE_COLOR)
-        draw_l.ellipse(mask_box,  fill=BG_COLOR)
-        draw_r.ellipse(outer_box, fill=EYE_COLOR)
-        draw_r.ellipse(mask_box,  fill=BG_COLOR)
-        self._push(img_l, img_r)
-
-    def _blink_then_restore(self):
-        """Transient blink: briefly show closed-lid, then restore last emotion."""
-        img_l, img_r, draw_l, draw_r = self._new_frames()
-        # Closed-lid = thin horizontal bar (slimmer than neutral)
-        lid_box = [80, 115, 240, 125]
-        draw_l.rounded_rectangle(lid_box, radius=5, fill=EYE_COLOR)
-        draw_r.rounded_rectangle(lid_box, radius=5, fill=EYE_COLOR)
-        self._push(img_l, img_r)
-        time.sleep(0.15)
-        self._render(self._last_emotion)
+    def destroy_node(self):
+        self._running = False
+        self._wake.set()
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
+        return super().destroy_node()
 
 
 def main(args=None):

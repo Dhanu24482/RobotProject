@@ -147,8 +147,19 @@ const int GOODBYE_HOLD_MS    = 900;  // pause on the salute; the wave fills the 
 int POSE_HOME[NUM_ARM]      = {0, 90, 90, 0, 90, 90, WRIST_NEUTRAL, WRIST_NEUTRAL};
 int POSE_HAND_UP[NUM_ARM]   = {180, 90, 90, 180, 90, 90, WRIST_NEUTRAL, WRIST_NEUTRAL};
 int POSE_HAND_DOWN[NUM_ARM] = {0, 90, 90, 0, 90, 90, WRIST_NEUTRAL, WRIST_NEUTRAL};
+// DISABLED — <PULL_UP>/<PULL_DOWN> are ignored in parseSerialCommand(). They drove the
+// shoulder roll to 0/180 and the elbow to 180/0 (full servo travel) and swung the arms
+// into the torso. Kept for reference only; do not re-enable without measuring limits.
 int POSE_PULL_UP[NUM_ARM]   = {0, 0, 180, 0, 0, 180, WRIST_NEUTRAL, WRIST_NEUTRAL};
 int POSE_PULL_DOWN[NUM_ARM] = {0, 180, 0, 0, 180, 0, WRIST_NEUTRAL, WRIST_NEUTRAL};
+
+// PROVISIONAL shoulder-roll safety clamp (robot-space degrees, 90 = arm hanging straight).
+// The arms hang almost against the torso, so roll has very little travel. Every arm move
+// goes through moveArmPose(), which clamps both roll servos to this window. These values
+// are a conservative guess, not measured: find the real contact angles by stepping the
+// roll in small increments, then set the window a few degrees short of them.
+const int ARM_ROLL_MIN = 75;
+const int ARM_ROLL_MAX = 105;   // SALUTE uses 105, so this is the smallest window that keeps it
 int POSE_SALUTE[NUM_ARM]    = {0, 90, 90, 180, 105, 75, WRIST_NEUTRAL, WRIST_SALUTE};
 
 // Wave geometry: the shoulder lifts the arm, the elbow holds the forearm up, and
@@ -377,8 +388,8 @@ void parseSerialCommand(String cmd) {
   if (inner == "HOME" || inner == "ARM_HOME") { moveArmPose(POSE_HOME); return; }
   if (inner == "HAND_UP")   { moveArmPose(POSE_HAND_UP); return; }
   if (inner == "HAND_DOWN") { moveArmPose(POSE_HAND_DOWN); return; }
-  if (inner == "PULL_UP")   { moveArmPose(POSE_PULL_UP); return; }
-  if (inner == "PULL_DOWN") { moveArmPose(POSE_PULL_DOWN); return; }
+  // PULL_UP / PULL_DOWN intentionally ignored (arms swung into the torso) — see POSE_PULL_*.
+  if (inner == "PULL_UP" || inner == "PULL_DOWN") { return; }
   if (inner == "SALUTE")    { moveArmPose(POSE_SALUTE); return; }
   if (inner == "GOODBYE")   { doGoodbye(); return; }
 
@@ -558,14 +569,23 @@ void copyArmPose(const int src[NUM_ARM], int dst[NUM_ARM]) {
 // An overload rather than a default argument: the Arduino builder hoists its own
 // prototypes above every call site, and a default declared only down here would
 // not be visible to the calls in parseSerialCommand().
+// Clamp a requested arm angle to what the mechanics allow (shoulder roll only, for now).
+int safeArmTarget(int index, int angle) {
+  if (index == L_SHOULDER_ROLL || index == R_SHOULDER_ROLL) {
+    return constrain(angle, ARM_ROLL_MIN, ARM_ROLL_MAX);
+  }
+  return angle;
+}
+
 void moveArmPose(int targetPose[NUM_ARM], int stepDelayMs) {
   bool moving = true;
   while (moving) {
     moving = false;
     for (int i = 0; i < NUM_ARM; i++) {
-      if (currentArmAngle[i] != targetPose[i]) {
+      int target = safeArmTarget(i, targetPose[i]);
+      if (currentArmAngle[i] != target) {
         moving = true;
-        if (currentArmAngle[i] < targetPose[i]) currentArmAngle[i]++;
+        if (currentArmAngle[i] < target) currentArmAngle[i]++;
         else currentArmAngle[i]--;
         armServos[i].write(getArmServoAngle(i, currentArmAngle[i]));
       }

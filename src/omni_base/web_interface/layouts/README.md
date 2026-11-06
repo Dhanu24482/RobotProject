@@ -6,13 +6,22 @@ Six interchangeable front-ends for the tablet-mounted control panel. Open
 All six are fully functional and behave identically — they differ only in
 visual arrangement, so you can choose on looks alone.
 
-## Why there is a shared core
+## How it is put together
 
-Every layout loads [`../lumi-core.js`](../lumi-core.js), which owns all of the
-ROS I/O, map rendering and input handling. The layout files contain no
-JavaScript beyond a single `LUMI.init()` call. That keeps a bug fix or a new
-feature a one-file change instead of a six-file change, and it makes the
-layouts genuinely comparable.
+Three layers, so a change is made once:
+
+| Layer | File | Owns |
+| --- | --- | --- |
+| Design system | [`../lumi-ui.css`](../lumi-ui.css) | Colours, type, buttons, cards, sliders, the drive pad, expression buttons, map stage, toast, banner, tabs, slide-over panels. Dark by default; `data-theme="auto"` follows the device, `data-theme="light"` forces light. |
+| Engine | [`../lumi-core.js`](../lumi-core.js) | All ROS I/O, map rendering, input handling, and the generated control sets (expressions, body moves, map modes, drive pad, speed sliders). |
+| Layout | `layouts/<name>.html` + `<name>.css` | Only *where* things go. The CSS file is arrangement only (grid areas, sizes, breakpoints). |
+
+A page starts itself: `<body data-lumi-app="mapCanvas">` is all it needs (add
+`data-autoconnect="false"` to stop it connecting on load). There is no inline
+JavaScript, no inline CSS and nothing loaded from the internet: `roslib` and the
+fonts live in [`../lib/`](../lib/), so the dashboards work with the robot's
+internet down, and the panel serves them under a strict Content-Security-Policy
+(`script-src 'self'; style-src 'self'; font-src 'self'`).
 
 ## The layouts
 
@@ -71,20 +80,20 @@ Other things worth checking:
 - The launch really did include `use_web:=true`, or `rosbridge_websocket` is
   running some other way. Confirm with `ros2 node list | grep rosbridge`.
 - Port 9090 is reachable from the tablet: `curl -v telnet://<pi-ip>:9090`.
-- The two CDN `<script>` tags loaded. Without internet on the tablet, `roslib`
-  is missing and the banner says so. For a permanently offline robot, download
-  `roslib.min.js` and `eventemitter2.min.js` next to `lumi-core.js` and point
-  the two tags at the local copies.
+- `lib/roslib.min.js` loads (the page needs the `lib/` folder next to
+  `lumi-core.js`). The banner says so if `ROSLIB` is missing.
 
 ### Regression test
 
-`scripts/check_web_layouts.py` runs `lumi-core.js` in a real JS engine against a
-synthetic DOM built from each layout, then simulates taps on every binding. It
-catches an exception during init that would otherwise silently kill every
-control on the page — the kind of failure a syntax check misses.
+`scripts/check_web_layouts.py` runs `lumi-core.js` against a synthetic DOM built
+from each layout, then simulates taps on every binding. It catches an exception
+during init that would otherwise silently kill every control on the page, the
+kind of failure a syntax check misses. It uses `py-mini-racer` where that has a
+native build and falls back to Node.js (any machine with `node`, including the
+Raspberry Pi):
 
 ```bash
-uv run --no-project --python 3.12 --with py-mini-racer python scripts/check_web_layouts.py
+python3 scripts/check_web_layouts.py
 ```
 
 ## Tablet behaviour
@@ -99,6 +108,10 @@ These were built for touch, which the previous interface was not:
 - Drive buttons capture the pointer, so lifting your finger always stops the
   robot even if it slid off the button.
 - Driving also stops automatically if the tab is backgrounded or loses focus.
+- Every page (all six layouts, the layout picker and the voice page) has a
+  **fullscreen** button in its header, and the `F` key does the same. The icon flips
+  while fullscreen is on, and the button hides itself on browsers that cannot do it
+  (iPhone Safari). Browsers only enter fullscreen right after a real tap or key press.
 - Page zoom and text selection are disabled so stray touches cannot disturb the
   layout.
 
@@ -130,13 +143,29 @@ one line of HTML with no JavaScript:
 | `data-lumi="px"` | Element is filled with a live value. Also gets a `data-state` of `ok`/`warn`/`err` you can style. |
 | `data-drive="1,0"` | Hold to drive. The pair is a linear and angular multiplier applied to the current speed settings. |
 | `data-body="NOD"` | Publishes to `/robot/body/command`. |
-| `data-emotion="happy"` | Publishes to `/robot/emotion`. |
+| `data-emotion="happy"` | Publishes to `/robot/emotion`. Names the eyes know: `neutral happy sad angry surprised blink love excited dizzy sleepy wink` (aliases such as `heart_eyes`, `star_eyes` also work). |
 | `data-mode="goal"` | Switches map interaction mode. Gets an `act` class when selected. |
 | `data-room="lobby"` | Navigates to a named destination. |
 | `data-action="stop"` | One of `connect`, `disconnect`, `stop`, `cancel`, `go`, `zoom-in`, `zoom-out`, `fit`, `fullscreen`. |
 | `data-lumi="rooms"` | A `<select>` populated with destinations. Add `data-autogo` to navigate on change instead of requiring a separate send button. |
 | `data-lumi="room-buttons"` | A container filled with one button per destination. |
 | `data-lumi="motor-power"` | A `range` input that retunes the robot's PWM ceiling on `/robot/speed`. Publishes on release, and syncs itself from `/robot/speed/state`, so it shows the robot's real speed rather than the markup default. Pair with `data-lumi="motor-power-value"` and `data-lumi="motor-power-pct"` read-outs. |
+
+### Generated control sets
+
+The core builds these from one definition each, so adding an expression or a body
+move is a one-line change in `lumi-core.js`, not an edit in every layout. Put an
+empty element where you want them:
+
+| Markup | Fills the element with |
+| --- | --- |
+| `<div class="emo-grid" data-lumi="emotion-buttons">` | A button per expression, drawn as the pair of eyes the robot shows (no emoji, so it looks the same on every device). Add `data-only="happy,love,wink"` for a subset. The current expression is highlighted. |
+| `<div class="chip-grid" data-lumi="body-buttons">` | The body moves (nod, shake, waves, salute, wrist…). |
+| `<div class="seg" data-lumi="mode-buttons">` | The four map modes (add `cols-2` for a 2×2 grid, `vertical` for a column). |
+| `<div data-lumi="dpad">` | The drive pad. `data-variant="row"` gives a compact one-row pad for narrow bars. |
+| `<div data-lumi="speed-controls">` | Forward / turn / robot-speed sliders (the robot-speed one is left out of the kiosk on purpose). |
+| `<button data-tab="go">` + `<section data-tabpanel="go">` | Tabs; the first one is open at start. |
+| `<button data-open="drawer">` + `<div class="overlay" id="drawer">` | A slide-over panel; `data-close`, a tap on the backdrop or Escape closes it. |
 
 Note the difference between the two kinds of speed control. `lin-speed` and
 `ang-speed` only shape the `Twist` that *this page* sends, so they affect the
@@ -145,10 +174,18 @@ robot, which also governs Nav2 goals, the voice shortcuts and the Bluetooth hand
 so it is deliberately absent from the kiosk layout, where the public can reach it.
 
 The map reads its colours from the CSS custom properties `--accent`, `--green`,
-`--dim` and `--text`, so it themes itself to whichever layout it is in.
+`--dim`, `--text` and `--map-unknown` / `--map-wall` / `--map-free`, so it themes
+itself to whichever layout it is in (including the light theme).
 
-## Note on the previous interface
+## The old single-page interface
 
-`../index.html` is the original single-file control panel. It still works and
-is left untouched. Once you have chosen a layout, you can either point people
-at it directly or copy it over `index.html`.
+`../index.html` used to be a 700-line single-file dashboard with its own copy of
+the logic and a hard-coded address. It is now a small redirect to this folder:
+everything it did is in the layouts (the **Console** layout is the closest match).
+
+## The layout picker
+
+[`index.html`](index.html) shows a schematic of each layout. Tick *Open the
+layout I pick automatically on this device* and a wall tablet opens straight into
+its layout from then on; every layout has a **Layouts** link (`index.html?choose`)
+to come back.

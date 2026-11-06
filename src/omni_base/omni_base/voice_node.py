@@ -12,6 +12,7 @@ from geometry_msgs.msg import Twist
 from geometry_msgs.msg import PoseStamped
 from action_msgs.msg import GoalStatusArray
 import speech_recognition as sr
+from omni_base.motion_stop import Halter
 import subprocess
 import threading
 import tempfile
@@ -220,6 +221,8 @@ class VoiceNode(Node):
             'saved_locations_file',
             os.path.join(os.path.expanduser('~'), '.ros', 'lumi_saved_locations.yaml')
         ).value
+        # Kept for backward compatibility; drive commands now use the bridge's pulses,
+        # which follow the live /robot/speed setting.
         self.drive_pwm     = self.declare_parameter('drive_pwm', 20).value
         # ── Robot name (wake-word trigger) — change here to rename the robot ──
         self.robot_name    = self.declare_parameter('robot_name', 'lumi').value.lower().strip()
@@ -241,6 +244,11 @@ class VoiceNode(Node):
         hands_topic        = self.declare_parameter('hands_topic',  '/robot/hands/pose').value
         goal_topic         = self.declare_parameter('goal_topic',   '/goal_pose').value
         emotion_topic      = self.declare_parameter('emotion_topic', '/robot/emotion').value
+        # Browser-originated actions (transcribed AND parsed on the client, validated by
+        # remote_node) arrive here as JSON; the robot's spoken replies are mirrored out.
+        remote_topic       = self.declare_parameter('remote_topic', '/robot/voice/remote_action').value
+        reply_topic        = self.declare_parameter('reply_topic',  '/robot/voice/reply').value
+        self.enable_mic    = self.declare_parameter('enable_mic', True).value
 
         # Room coordinates: start from canonical static rooms (config/rooms.yaml),
         # then overlay any user-saved locations persisted by the web UI / location_manager.
@@ -271,6 +279,10 @@ class VoiceNode(Node):
         self.head_pub    = self.create_publisher(Float32MultiArray, head_topic,    10)
         self.hands_pub   = self.create_publisher(Float32MultiArray, hands_topic,   10)
         self.emotion_pub = self.create_publisher(String,            emotion_topic, 10)
+        self.reply_pub   = self.create_publisher(String,            reply_topic,   10)
+        # Stops motors, timed drive pulses AND any active Nav2 goal (see motion_stop.py).
+        self.halter      = Halter(self, body_topic=body_topic)
+        self.create_subscription(String, remote_topic, self._on_remote_action, 10)
 
         # This publishes directly to ROS2 Nav2 stack
         self.goal_pub    = self.create_publisher(PoseStamped,       goal_topic,  10)
@@ -288,8 +300,16 @@ class VoiceNode(Node):
         # Suppress libasound's verbose PCM-enumeration stderr before opening mic.
         _silence_alsa_errors()
         # Open the microphone once and reuse it (re-opening every loop iteration
-        # is slow and can leak audio device handles).
-        self.microphone = sr.Microphone()
+        # is slow and can leak audio device handles). The mic is optional: if it
+        # is disabled or fails to open, the node still serves remote (browser)
+        # commands arriving on remote_topic.
+        self.microphone = None
+        if self.enable_mic:
+            try:
+                self.microphone = sr.Microphone()
+            except Exception as e:
+                self.get_logger().error(
+                    f'Microphone unavailable ({e}); continuing with remote commands only.')
 
         # ADDED 'go to', 'navigate to', 'take me to' back into hardcoded list
         self.robot_commands = [
@@ -299,20 +319,26 @@ class VoiceNode(Node):
             'look left', 'look right', 'look forward', 'look center', 'nod', 'shake', 'blink', 'wink',
             'wave', 'wave left', 'wave right', 'hands up', 'hands down',
             'salute', 'goodbye', 'good bye', 'bye', 'see you',
-            'pull up', 'pull down', 'reset', 'center'
+            'reset', 'center'
         ]
 
-        try:
-            with self.microphone as source: self.recognizer.adjust_for_ambient_noise(source, duration=2)
-        except Exception as e: self.get_logger().error(f'Microphone error: {e}')
+        if self.microphone is not None:
+            try:
+                with self.microphone as source: self.recognizer.adjust_for_ambient_noise(source, duration=2)
+            except Exception as e: self.get_logger().error(f'Microphone error: {e}')
 
         time.sleep(1)
         self.set_emotion('happy')
         self.speak_async(f'{self.robot_name.capitalize()} online. Navigation and AI systems ready.')
-        threading.Thread(target=self.listen_loop, daemon=True).start()
+        if self.microphone is not None:
+            threading.Thread(target=self.listen_loop, daemon=True).start()
 
     def speak(self, text):
         self.is_speaking = True
+        # Mirror everything the robot says so remote clients can show the reply.
+        try:
+            msg = String(); msg.data = text; self.reply_pub.publish(msg)
+        except Exception: pass
         try: self.tts.speak(text)
         except Exception as e: self.get_logger().error(f'Speak error: {e}')
         finally: self.is_speaking = False
@@ -322,12 +348,14 @@ class VoiceNode(Node):
 
     def listen_loop(self):
         while self.listening:
-            if self.is_speaking:
-                time.sleep(0.3)
-                continue
             try:
                 with self.microphone as source: audio = self.recognizer.listen(source, timeout=5, phrase_time_limit=10)
                 text = self.recognizer.recognize_google(audio).lower().strip()
+                # The mic stays open while the robot talks so "stop" always works (e.g.
+                # right after a drive command, while "Moving forward." is still playing).
+                # Anything else heard during our own speech is the speaker echoing: drop it.
+                if self.is_speaking and not self._is_stop_phrase(text):
+                    continue
                 self.get_logger().info(f'Heard: "{text}"')
                 msg = String(); msg.data = text; self.voice_pub.publish(msg)
                 self.route(text)
@@ -359,7 +387,32 @@ class VoiceNode(Node):
         remainder = text[m.end():].lstrip(' ,;:!?')
         return remainder
 
+    def _on_remote_action(self, msg: String):
+        """Execute an already-parsed action from remote_node (browser did the STT + parsing).
+
+        Payload is JSON: {"type": "command", "text": "<canonical command>"} or
+        {"type": "ask", "text": "<question>"}. Commands skip the wake word and the
+        substring router and go straight to handle_robot_command(); questions go
+        straight to the LLM so words like "stop" inside a question can't trigger motion.
+        """
+        try:
+            data = json.loads(msg.data)
+            kind, text = data['type'], str(data['text']).strip()[:200]
+        except Exception as e:
+            self.get_logger().warn(f'Bad remote action payload: {e}')
+            return
+        if not text:
+            return
+        self.get_logger().info(f'Remote {kind}: "{text if kind == "command" else "<question>"}"')
+        if kind == 'command':
+            self.handle_robot_command(text.lower())
+        elif kind == 'ask':
+            self.handle_ai_question(text)
+
     def route(self, text):
+        if self._is_stop_phrase(text):
+            self.emergency_stop()
+            return
         command = self._strip_wake_word(text)
         if command is None:
             self.get_logger().debug(f'Ignored (no wake word): "{text}"')
@@ -386,40 +439,36 @@ class VoiceNode(Node):
 
         # ── MOVEMENT (Arduino Expects <LEFT_PWM,RIGHT_PWM>) ──
         elif any(w in text for w in ['go forward','move forward','go ahead']):
-            p = self.drive_pwm
             self.set_emotion('neutral')
             self.speak_async('Moving forward.')
-            self.body_cmd(f'<{p},{p}>')
+            self.body_cmd('FORWARD')       # bridge: 2 s pulse at the live drive speed
 
         elif any(w in text for w in ['go backward','go back','move back','reverse']):
-            p = self.drive_pwm
             self.set_emotion('neutral')
             self.speak_async('Moving backward.')
-            self.body_cmd(f'<{-p},{-p}>')
+            self.body_cmd('BACKWARD')
 
         elif any(w in text for w in ['turn left','rotate left']):
-            p = self.drive_pwm
             self.set_emotion('neutral')
             self.speak_async('Turning left.')
-            self.body_cmd(f'<{-p},{p}>')
+            self.body_cmd('LEFT')
 
         elif any(w in text for w in ['turn right','rotate right']):
-            p = self.drive_pwm
             self.set_emotion('neutral')
             self.speak_async('Turning right.')
-            self.body_cmd(f'<{p},{-p}>')
+            self.body_cmd('RIGHT')
 
         elif any(w in text for w in ['stop','halt','emergency stop']):
-            self.set_emotion('surprised')
-            self.speak_async('Stopped.')
-            self.body_cmd('<0,0>')
+            self.emergency_stop()
 
         # ── ANIMATIONS (Arduino Expects <COMMAND>) ──
         elif 'nod'   in text:
             self.set_emotion('happy');   self.body_cmd('<NOD>');   self.speak_async('Yes!')
         elif 'shake' in text:
             self.set_emotion('angry');   self.body_cmd('<SHAKE>'); self.speak_async('No!')
-        elif 'blink' in text or 'wink' in text:
+        elif 'wink' in text:
+            self.set_emotion('wink')       # one eye winks, then the face goes back to what it was
+        elif 'blink' in text:
             self.set_emotion('blink')
         elif 'wave left'  in text:
             self.set_emotion('happy');   self.body_cmd('<WAVE:L>'); self.speak_async('Hello!')
@@ -448,14 +497,9 @@ class VoiceNode(Node):
             self.speak_async('Salute!')
             self.body_cmd('<SALUTE>')
             self.publish_hands(90.0, 180.0)
-        elif 'pull up' in text:
-            self.set_emotion('happy')
-            self.speak_async('Pulling up.')
-            self.body_cmd('<PULL_UP>')
-        elif 'pull down' in text:
-            self.set_emotion('neutral')
-            self.speak_async('Pulling down.')
-            self.body_cmd('<PULL_DOWN>')
+        # "pull up" / "pull down" are intentionally NOT handled: those poses drove the
+        # shoulder roll and elbow to full travel and swung the arms into the torso.
+        # Re-add only after the safe arm limits are measured (see firmware ARM_ROLL_*).
         elif 'hands up' in text:
             self.set_emotion('happy')
             self.speak_async('Hands up.')
@@ -478,6 +522,23 @@ class VoiceNode(Node):
 
         elif 'reset' in text or 'center' in text:
             self.set_emotion('neutral'); self.body_cmd('<CENTER>'); self.speak_async('Reset.')
+
+    _STOP_RE = re.compile(r'\b(?:stop|halt)\b')
+
+    def _is_stop_phrase(self, text):
+        """True for a short utterance containing stop/halt ("stop", "emergency stop", "please stop").
+
+        Deliberately needs no wake word: when the robot is moving, shouting "stop" must work.
+        Long sentences are excluded so questions like "what is a bus stop" still go to the LLM.
+        """
+        words = re.sub(r'[^\w\s]', ' ', text.lower()).split()
+        return len(words) <= 4 and bool(self._STOP_RE.search(' '.join(words)))
+
+    def emergency_stop(self):
+        self._active_goal = None            # don't announce "arrived/blocked" for a goal we cancelled
+        self.halter.halt()
+        self.set_emotion('surprised')
+        self.speak_async('Stopped.')
 
     def handle_room_navigation(self, text):
         triggers = ['go to','navigate to','drive to','take me to']

@@ -1,0 +1,35 @@
+/* Layout picker */
+
+.wrap { max-width: 1120px; margin-inline: auto; padding: clamp(22px, 5vw, 64px) clamp(16px, 4vw, 36px) 48px; }
+.hero { display: grid; gap: 14px; margin-bottom: clamp(24px, 4vw, 44px); }
+.hero-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.hero .brand { font-size: 20px; }
+.hero h1 { font: 800 clamp(30px, 5vw, 52px)/1.05 var(--font); letter-spacing: -.035em; max-width: 14ch; }
+.hero h1 em { font-style: normal; color: var(--accent); text-shadow: 0 0 30px var(--accent-soft); }
+.hero p { color: var(--dim); font-size: clamp(15px, 1.6vw, 18px); max-width: 56ch; }
+
+.cards { display: grid; gap: 18px; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); }
+.layout-card {
+  display: grid; gap: 14px; padding: 14px 14px 18px; color: inherit; text-decoration: none; border-radius: var(--r-lg);
+  background: linear-gradient(180deg, var(--surface), var(--bg-2)); border: 1px solid var(--line); box-shadow: var(--lift);
+  transition: transform .18s var(--ease), border-color .18s, box-shadow .18s;
+}
+.layout-card:hover { transform: translateY(-4px); border-color: var(--accent-line); box-shadow: 0 0 0 4px var(--accent-soft), var(--lift); }
+.layout-card:active { transform: scale(.98); }
+.layout-card.current { border-color: var(--accent); }
+.layout-card.current .name::after { content: "your choice"; margin-left: 10px; padding: 3px 9px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font: 700 10px var(--font); letter-spacing: .08em; text-transform: uppercase; vertical-align: middle; }
+.thumb { width: 100%; height: auto; display: block; border-radius: var(--r); border: 1px solid var(--line); }
+.layout-card .name { font: 700 19px/1.2 var(--font); letter-spacing: -.01em; padding: 0 4px; }
+.layout-card .why { color: var(--dim); font-size: 14px; padding: 0 4px; }
+.layout-card .go { padding: 0 4px; color: var(--accent); font: 700 13px var(--font); }
+.layout-card .go::after { content: " \2192"; transition: margin .18s var(--ease); }
+.layout-card:hover .go::after { margin-left: 4px; }
+
+.remember { display: flex; align-items: center; gap: 12px; margin-top: 30px; color: var(--dim); font-size: 14px; cursor: pointer; width: fit-content; }
+.remember input { width: 20px; height: 20px; accent-color: var(--accent); cursor: pointer; }
+
+/* schematic thumbnails (colours come from the theme) */
+.s-bg { fill: var(--bg-2); } .s-map { fill: var(--map-unknown); stroke: var(--line-2); stroke-width: 1; }
+.s-card { fill: var(--surface-3); } .s-line { fill: var(--line-2); }
+.s-acc { fill: var(--accent); } .s-red { fill: var(--red-solid); } .s-glass { fill: var(--glass); stroke: var(--line-2); stroke-width: 1; }
+.s-free { fill: var(--map-free); opacity: .75; }

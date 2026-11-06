@@ -7,7 +7,7 @@ built from each layout's markup, then exercises the declarative bindings the
 same way a finger would. Catches the class of bug a syntax check cannot: an
 exception thrown during init that silently kills every control on the page.
 
-    uv run --python 3.12 --with py-mini-racer python scripts/check_web_layouts.py
+    uv run --python 3.12 --with py-mini-racer python scripts/check_web_layouts.py   (or plain python3 + node)
 """
 
 import glob
@@ -16,7 +16,35 @@ import os
 import sys
 from html.parser import HTMLParser
 
-from py_mini_racer import MiniRacer
+import subprocess
+
+try:                                    # preferred: an embedded V8
+    from py_mini_racer import MiniRacer
+    MiniRacer()                         # raises if there is no native build for this CPU (e.g. a Raspberry Pi)
+except Exception:                       # fall back to Node.js, which every ROS dev machine here has
+    MiniRacer = None
+
+
+class NodeContext:
+    """The one thing this script needs from MiniRacer, backed by Node's `vm` module.
+
+    Each eval() replays every earlier snippet in a fresh context and returns the value of the latest one, which is plenty
+    for four small snippets and keeps the interface identical."""
+
+    RUNNER = ("const vm=require('vm');const s=JSON.parse(require('fs').readFileSync(0,'utf8'));"
+              "const c=vm.createContext({console});let r;for(const x of s)r=vm.runInContext(x,c);"
+              "process.stdout.write(typeof r==='string'?r:(r&&typeof r==='object')||typeof r==='function'?'':String(r));")
+
+    def __init__(self):
+        self.snippets = []
+
+    def eval(self, code):
+        self.snippets.append(code)
+        done = subprocess.run(["node", "-e", self.RUNNER], input=json.dumps(self.snippets),
+                              capture_output=True, text=True, timeout=120)
+        if done.returncode:
+            raise RuntimeError(done.stderr.strip()[:600])
+        return done.stdout
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB = os.path.join(ROOT, "src", "omni_base", "web_interface")
@@ -69,7 +97,7 @@ function El(tag, attrs) {
   this.children = [];
   this.parentElement = null;
   this.listeners = {};
-  this.style = {};
+  this.style = { setProperty: function (k, v) { this[k] = v; } };
   this.textContent = '';
   this._html = '';
   this.value = this.attrs.value || '';
@@ -172,7 +200,7 @@ var localStorage = {
   getItem: function (k) { return k in __storage ? __storage[k] : null; },
   setItem: function (k, v) { __storage[k] = String(v); }
 };
-var location = { hostname: '127.0.0.1' };
+var location = { hostname: '127.0.0.1', host: '127.0.0.1:8080', protocol: 'http:', pathname: '/layouts/test.html' };
 var devicePixelRatio = 1;
 var __timers = 0;
 function setTimeout() { return ++__timers; }
@@ -263,7 +291,11 @@ check('press a drive button', function () {
 });
 check('offline banner injected', function () {
   var b = __body.children[__body.children.length - 1];
-  return b && b.style.cssText && b.style.display === 'flex' ? 'shown' : 'MISSING';
+  return b && b.className === 'lumi-banner' && b.style.display === 'flex' ? 'shown' : 'MISSING';
+});
+check('fullscreen button present', function () {
+  var n = document.querySelectorAll('[data-action="fullscreen"]').length;
+  return n === 1 ? 'yes' : (n === 0 ? 'MISSING (every layout needs one)' : n + ' buttons');
 });
 check('speed slider bound', function () {
   var s = document.querySelectorAll('[data-lumi="motor-power"]')[0];
@@ -309,7 +341,7 @@ def main():
         parser = DomBuilder()
         parser.feed(open(path, encoding="utf-8").read())
 
-        ctx = MiniRacer()
+        ctx = MiniRacer() if MiniRacer else NodeContext()
         try:
             ctx.eval(SHIM)
             ctx.eval(build_page(parser.root))
@@ -322,7 +354,7 @@ def main():
 
         print(f"\n=== {name} ===")
         for c in report["checks"]:
-            bad = "THREW" in c["result"] or "NOT SET" in c["result"]
+            bad = any(w in c["result"] for w in ("THREW", "NOT SET", "MISSING"))
             failed = failed or bad
             print(f"  {'FAIL' if bad else 'ok  '}  {c['name']}: {c['result']}")
         for e in report["errors"]:

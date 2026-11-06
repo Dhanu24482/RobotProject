@@ -81,14 +81,17 @@ ros2_ws/
 │   │   ├── urdf/omniserv.urdf   ← robot URDF model (single source of truth)
 │   │   ├── maps/                ← my_room_map.pgm / .yaml
 │   │   ├── web_interface/
-│   │   │   ├── index.html          ← original single-file dashboard
-│   │   │   ├── lumi-core.js        ← shared ROS logic for all layouts
-│   │   │   └── layouts/            ← 6 tablet control panel layouts + picker
+│   │   │   ├── lumi-ui.css         ← shared design system (colours, controls, themes)
+│   │   │   ├── lumi-core.js        ← shared ROS logic + generated controls for all layouts
+│   │   │   ├── lib/                ← roslib + fonts, served locally (works with no internet)
+│   │   │   ├── index.html          ← redirects to layouts/ (the old single-file page was retired)
+│   │   │   └── layouts/            ← 6 layouts (arrangement only) + the picker
 │   │   ├── package.xml
 │   │   └── setup.py
 │   ├── rf2o_laser_odometry/     ← 3rd-party: laser scan-matching odometry
 │   └── sllidar_ros2/            ← 3rd-party: Slamtec RPLiDAR A1 driver
 ├── scripts/                     ← flash_arduino.sh, save_map.sh
+├── panel/                       ← control panel service: lumi_panel/ (stdlib Python), install.sh, lumi-panel.service
 ├── omniserv_map.pgm             ← saved occupancy-grid map (legacy duplicate)
 ├── omniserv_map.yaml            ← map metadata (res 0.05 m/px)
 ├── omniserv_boot.sh             ← mapping entrypoint (calls mapping.launch.py)
@@ -178,9 +181,11 @@ ros2 topic echo /robot/speed/state
 | Drive shortcut | `FORWARD`, `BACKWARD`, `LEFT`, `RIGHT` | Timed drive (2–2.5 s) in background thread |
 | Stop | `STOP` | Sends `<0,0>` immediately |
 | Servo / animation | `NOD`, `SHAKE`, `EBLINK`, `CENTER`, `WAVE:L`, `WAVE:R` | Forwarded as `<CMD>` |
-| Arm poses | `HOME`, `HAND_UP`, `HAND_DOWN`, `PULL_UP`, `PULL_DOWN`, `SALUTE`, `GOODBYE` | Forwarded as `<CMD>` |
+| Arm poses | `HOME`, `HAND_UP`, `HAND_DOWN`, `SALUTE`, `GOODBYE` (`PULL_UP`/`PULL_DOWN` are disabled — they swung the arms into the torso) | Forwarded as `<CMD>` |
 | Wrist presets | `WRIST:UP`, `WRIST:DOWN`, `WRIST:CENTER`, `WRIST:TEST` | Forwarded as `<CMD>` |
 | Servo pose prefix | `HP:`, `EL:`, `ER:`, `EY:`, `HL:`, `HR:`, `HANDS:`, `WL:`, `WR:`, `WRISTS:` | Forwarded as `<CMD>` |
+
+**Stopping.** A lone `<0,0>` is not enough: Nav2 keeps streaming `/cmd_vel`, and the firmware has a 1 s deadman watchdog, so motion commands must be refreshed. `omni_base/motion_stop.py` (`Halter`, used by `voice_node` and `remote_node`) therefore sends the bridge `STOP`, cancels all Nav2 `NavigateToPose` goals, publishes zero `/cmd_vel`, and repeats `<0,0>` at +0.3 s / +0.8 s. After a `STOP` the bridge also ignores `/cmd_vel` for `stop_holdoff_sec` (default 0.5 s) so in-flight Nav2 messages cannot restart the wheels. Voice: a bare "stop"/"halt"/"emergency stop" (≤ 4 words, no wake word needed) always works, and the mic keeps listening while the robot is speaking so "stop" is heard even during "Moving forward." Voice drive commands use the bridge's `FORWARD`/`BACKWARD`/`LEFT`/`RIGHT` 2–2.5 s pulses (live drive speed) instead of a single PWM write that the firmware watchdog would cut after 1 s.
 
 Timed drive pulses the Arduino at **10 Hz** to keep its watchdog alive. On node shutdown, `<0,0>` is always sent to stop the motors.
 
@@ -224,7 +229,7 @@ Microphone → Google STT → text
 | Navigation | "go to room 1", "navigate to reception", "take me to lobby", "go home", "go to abc" (user-saved via web UI) |
 | Movement | "go forward", "move back", "turn left", "turn right", "stop" |
 | Head / body | "look left", "look right", "look forward", "nod", "shake", "blink", "wink" |
-| Arms | "wave", "wave left", "hands up", "hands down", "salute", "goodbye" / "bye", "pull up", "pull down" |
+| Arms | "wave", "wave left", "hands up", "hands down", "salute", "goodbye" / "bye" |
 | Wrists | "wrist up", "wrist down", "wrist" (centers it) |
 | Reset | "reset", "center" |
 | AI question | anything else → answered by Gemini |
@@ -255,9 +260,11 @@ Requires the `GEMINI_API_KEY` environment variable. Uses `google-genai` with a p
 
 ### 3.3 `eyes_node`
 
-**File:** `src/omni_base/omni_base/eyes_node.py`
+**Files:** `src/omni_base/omni_base/eyes_node.py` (ROS + SPI) and `eye_art.py` (drawing + animation; pure Python/Pillow, unit-tested in `test/test_eye_art.py`)
 
-Drives two 2.4" ILI9341 320x240 TFT displays connected to the Pi's hardware SPI0 bus. Each time `voice_node` publishes an emotion, `eyes_node` renders the matching expression on both eyes simultaneously using Pillow frame buffers pushed in one shot (flicker-free).
+Drives two 2.4" ILI9341 320x240 TFT displays connected to the Pi's hardware SPI0 bus. Each panel sits behind a **round hole** in the face, so only the 180x180 circle centred on the panel is visible; every expression is drawn inside that circle (a circular mask is applied last, and a test proves the drawings fit on their own) and only that square is sent over SPI (~2.4x less traffic than a full frame, pixel-for-pixel identical result).
+
+Expressions are coloured and animated: changing expression is a quick blink (eyes close, the picture changes while they are shut, they open) with the colour fading across it, and the eyes also blink by themselves every 3-6 s. Moving expressions (heart beat, spinning star and spiral, breathing sleep) run at ~14 fps (a two-eye SPI update takes ~35 ms); a still face costs ~3 % of a core and sends nothing between blinks.
 
 **Subscription**
 
@@ -267,14 +274,21 @@ Drives two 2.4" ILI9341 320x240 TFT displays connected to the Pi's hardware SPI0
 
 **Supported emotion names**
 
-| Name | Expression |
-|------|------------|
-| `neutral` | Blue rounded rectangle dash — default / idle |
-| `happy` | Upper-half crescent (arch) |
-| `surprised` | Hollow ring |
-| `angry` | Ellipse with triangular brow mask |
-| `sad` | Lower-half crescent |
-| `blink` | Transient thin closed-lid, then restores previous emotion |
+| Name | Look | Colour |
+|------|------|--------|
+| `neutral` | Rounded dash — default / idle | blue |
+| `happy` | Upper crescent (arch) | warm yellow |
+| `sad` | Lower crescent | deep blue |
+| `angry` | Ellipse with a brow cut, mirrored per eye | red |
+| `surprised` | Hollow ring ("O") | white |
+| `love` | Beating heart with a highlight (aliases: `heart`, `heart_eyes`) | pink-red |
+| `excited` | Twinkling, slowly turning star (aliases: `star`, `stars`) | gold |
+| `dizzy` | Spinning spiral (alias: `confused`) | purple |
+| `sleepy` | Closed eyes, a soft arc that breathes (aliases: `sleep`, `sleeping`, `tired`) | dim blue-grey |
+| `wink` | Left eye open, right eye a happy arc; returns to the previous expression after ~1.4 s | warm yellow |
+| `blink` | One blink, keeping the current expression | — |
+
+Colours, aliases and timings live at the top of `eye_art.py`. Parameters of the node: `idle_blink` (default true), `transitions` (default true; false = switch instantly), `fps` (15), `send_hole_only` (true). Try one: `ros2 topic pub --once /robot/emotion std_msgs/String "{data: love}"`. The dashboard buttons still cover the original six; any layout can publish the new names through `setEmotion('love')`.
 
 **Emotion triggers (set by `voice_node`)**
 
@@ -294,7 +308,8 @@ Drives two 2.4" ILI9341 320x240 TFT displays connected to the Pi's hardware SPI0
 | Stop / emergency stop | `surprised` |
 | Wave / hands up | `happy` |
 | Movement / reset | `neutral` |
-| "blink" / "wink" command | `blink` |
+| "blink" command | `blink` |
+| "wink" command | `wink` |
 
 **Hardware pins (SPI0, shared bus)**
 
@@ -365,8 +380,9 @@ Key design decisions:
 
 **Files:**
 - `src/omni_base/web_interface/layouts/` — six tablet-ready control panel layouts (**recommended**)
-- `src/omni_base/web_interface/lumi-core.js` — shared ROS logic behind all six
-- `src/omni_base/web_interface/index.html` — the original single-file dashboard
+- `src/omni_base/web_interface/lumi-ui.css` — the shared design system (dark by default, light on request)
+- `src/omni_base/web_interface/lumi-core.js` — shared ROS logic and generated controls behind all six
+- `src/omni_base/web_interface/lib/` — `roslib` and the fonts, so the dashboards need no internet
 
 A standalone browser dashboard that renders the live Nav2 global costmap in real time using **roslibjs**. Open it from any device on the same Wi-Fi network as the Pi.
 
@@ -424,6 +440,50 @@ See `web_interface/layouts/README.md` for the full comparison table and the
 - Each saved entry has a small **×** to delete it. Deletes are also persisted and broadcast.
 
 The "Go To Room" buttons remain the static set from `config/rooms.yaml`. Runtime saves live in a separate list so they don't pollute the canonical rooms.
+
+### 6.3 Browser voice page (`remote_node`)
+
+For noisy places: a deliberately tiny **voice commander** page that controls the robot **without the robot's microphone**. It has one big **hold-to-speak** button (also the **Space** bar): hold, speak, release to send. Small toasts show what was understood and what Lumi answers. A small STOP button (also **Esc**) is the only other control; manual driving, gestures and typed commands live in the robot web (`/robot/`). **Speech-to-text and command parsing both run in the user's browser** (Web Speech API + `web_remote/app.js`). Audio and unrecognised speech never reach the robot; only a small validated action such as `{"action":"goto","room":"room 1"}` is sent. Spoken text that is not a command is dropped locally; questions for the LLM must start with "hey Lumi …" (typed text is always allowed to be a question).
+
+- Normally you do not launch it by hand: in the control panel (§6.4) turn on **Voice control** and choose **Browser** as its input. The page is then at **`/voice/`** on the panel's address.
+- **The mic and the browser page are mutually exclusive.** The panel has a single *voice input* choice (`mic` | `browser`); `browser` starts `remote_node` and runs `voice_node` with `enable_mic:=false`, `mic` stops the page and gives the microphone back. Switching restarts voice automatically.
+- Under the panel `remote_node` has **no TCP port**: it listens on a private Unix socket (`~/.local/state/lumi/remote.sock`, mode 0600) and the panel reverse-proxies `/voice/` to it. Standalone use is still possible: `ros2 launch omni_base navigation.launch.py use_voice:=true use_remote:=true enable_mic:=false` serves it on `127.0.0.1:8088`.
+- **No login of its own.** Access control belongs to the front door (localhost, or Cloudflare Access if you expose it). If `voice_node` is not running the page says so instead of pretending a command was sent.
+- **Server validation:** actions are checked against a fixed whitelist (`DRIVE`/`LOOK`/`GESTURE` tables, room names must exist); the client is never trusted. The `STOP` button halts the robot directly (see *Stopping* above) without depending on `voice_node`.
+- `voice_node` accepts the actions on `/robot/voice/remote_action` (JSON) and mirrors everything it says on `/robot/voice/reply`, which the page shows in its log.
+- Needs a browser with speech recognition (Chrome, Edge, Safari; not Firefox). Chrome/Safari send the audio to their own vendor's STT service — that is the browser's behaviour, not the robot's. Browsers only allow the microphone on HTTPS or localhost, so a remote phone needs the Cloudflare hostname.
+- If you change `web_remote/`, re-run `colcon build --packages-select omni_base` (files are installed to the share directory).
+
+### 6.4 Control panel (`panel/`, `lumi-panel.service`)
+
+A cPanel-style web service that runs on the Pi at boot, so nobody has to log in to start the robot. Pure Python standard library (it must work when ROS is *not* running, because it is what starts ROS). One listening port, `127.0.0.1:8090`, with paths:
+
+| Path | What |
+|---|---|
+| `/` | the control panel |
+| `/robot/` | the existing tablet dashboards (`web_interface/`), served read-only |
+| `/rosbridge` | WebSocket pass-through so those dashboards reach the loopback-only rosbridge (cross-site WebSocket attempts are refused) |
+| `/voice/` | the browser voice page (§6.3), proxied from a private Unix socket |
+
+```bash
+cd ~/ros2_ws/panel && ./install.sh        # installs + enables + starts the system service
+./install.sh --uninstall
+```
+
+What it does:
+
+- **Start / stop / restart the robot**, choosing the mode: *Off*, *Hardware*, *Mapping (SLAM)* or *Navigation on a chosen map*. It runs `ros2 launch` in its own process group, so stopping really stops everything; crashes restart with back-off; processes already running outside the panel (e.g. a manual `ros2 launch`) are detected and block a double start.
+- **Maps:** list built-in and saved maps with previews, save the live mapping result under a name, pick the map to navigate on, delete saved maps, set the initial pose. Saved maps live in `~/.local/share/lumi/maps` and are passed to Nav2 as an absolute path (no rebuild needed).
+- **Features on/off, live:** eye displays, voice control (+ input choice), robot web, remote RViz2 bridge. Changes apply immediately while the system runs; changes that only take effect at start show a *restart needed* tag.
+- **Configuration:** Gemini API keys (write-only: shown masked, add/remove/test), environment variables for the ROS processes (restricted to `GEMINI_`/`LUMI_`/`ROS_`/`RMW_`/`CYCLONEDDS_`/`FASTRTPS_`/`ROBOT_` names, so nothing can change what code runs), and robot parameters (serial ports, max PWM, wheel separation, …). On first run the ROS and Gemini settings in `~/.bashrc` are imported, because a system service does not read it. Secrets live in `~/.config/lumi/env` (mode 0600).
+- **Logs** for every process, an always-visible **STOP** button (same halt routine as voice), and Pi health (temperature, load, memory, disk).
+- Optional *autostart*: bring the system up by itself when the Pi boots. Off by default.
+
+**Security model.** The panel has no login: it listens on loopback only and expects the *front door* to authenticate. There is no endpoint that runs arbitrary commands, mutating requests must be same-origin JSON (blocks cross-site requests), and secrets are never returned unmasked. If you add a Cloudflare Tunnel hostname → `http://localhost:8090`, **you are responsible for putting Cloudflare Access on it** (the panel shows a warning banner when it is reached through Cloudflare without Access). *Settings → Network* can make it listen on all interfaces for LAN tablets — only do that on a network you trust.
+
+**Remote ROS 2 topics / RViz2 through the tunnel.** DDS needs UDP multicast, which a tunnel cannot carry, so the panel can run a Zenoh bridge (`zenoh-bridge-ros2dds`, installed from its tab) that tunnels ROS 2 over one TCP connection. On the Pi it listens on `127.0.0.1:7447` and `[::1]:7447`; add a second tunnel hostname of type **TCP → `127.0.0.1:7447`** (use the numeric form: `localhost` resolves to IPv6 first for cloudflared) with an Access policy. The bridge is a **transparent pipe**: there is no allow-list, deny-list, rate limit or access rule in it, so any topic, service or action - existing now, added later or renamed - crosses both ways under its own name, and ROS tools on the other machine see the same topic list as on the robot (tested: identical lists, service calls such as reading AMCL parameters, writes into the robot). Who may use it is decided in front of it by Cloudflare Access: anyone allowed through can do on the robot what a program running on it can, including driving it (`/cmd_vel`). Node *names* are not forwarded by the bridge (`ros2 node list` shows only the bridge), which RViz2 does not need.
+
+On the other Linux machine (headless is fine), download `lumi-rviz.sh` from the panel's RViz2 tab (it is generated on the spot from the hostname and ROS-domain fields there, so nothing is hardcoded; `LUMI_ROS_DOMAIN` and a hostname argument override at run time) and run `bash lumi-rviz.sh`. It installs `cloudflared` (latest GitHub release for the CPU) and the Zenoh bridge into `~/.lumi-rviz` **once**, signs you in to Cloudflare Access (link to open in any browser; or an Access service token via `CF_ACCESS_CLIENT_ID`/`CF_ACCESS_CLIENT_SECRET`), then runs the tunnel and the bridge **in the background** (restarted automatically if they drop) and then **checks everything end to end** (robot reachable; scan, tf and map data really arrive) and exits. It also adds a small marked block to `~/.bashrc` so a **new terminal is ready for plain `rviz2`** (`unsetup` removes it). **Running it again is safe at any time**: every step first checks and only repairs what is missing or unhealthy (a changed setting restarts the background tasks once; healthy ones are left untouched). It never starts RViz2. Other commands: `status`, `topics`, `test` (verifies data really arrives), `diag` (a redacted report for troubleshooting), `rviz` (starts the bridge if needed, then RViz2), `login`, `logs`, `stop`, `update`, `unsetup`. To open RViz2: run `rviz2` in a new terminal (or `source ~/.lumi-rviz/env.sh` in the current one), then add the displays you want (no RViz config is shipped; save your own `.rviz` file as usual). The bridge needs `ROS_DISTRO` set and local discovery over loopback unicast (`~/.lumi-rviz/cyclone-local.xml`); `env.sh` selects `rmw_cyclonedds_cpp` for the same reason.
 
 ---
 
@@ -575,8 +635,8 @@ systems ready."** The robot is now listening — speak a command.
 ### Step 7 — (Optional) Web interface
 
 With `use_web:=true` the WebSocket bridge is already running. Open
-`src/omni_base/web_interface/index.html` in a browser (with the Pi's IP filled
-in) for the live map, sensor panels, and click-to-navigate.
+`src/omni_base/web_interface/layouts/index.html` in a browser (with the Pi's IP filled
+in), or just use **Robot web** in the control panel, for the live map, sensor panels, and click-to-navigate.
 
 ---
 

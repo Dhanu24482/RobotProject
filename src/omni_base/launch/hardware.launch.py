@@ -8,6 +8,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -25,6 +26,7 @@ def generate_launch_description():
     max_pwm          = LaunchConfiguration('max_pwm')
     min_pwm          = LaunchConfiguration('min_pwm')
     publish_sensors  = LaunchConfiguration('publish_sensors')
+    use_eyes         = LaunchConfiguration('use_eyes')
 
     return LaunchDescription([
         DeclareLaunchArgument('lidar_port', default_value='/dev/rplidar',
@@ -43,6 +45,9 @@ def generate_launch_description():
         DeclareLaunchArgument('publish_sensors', default_value='false',
                               description='Publish ultrasonic /pit telemetry. Off by default: the '
                                           'readings are unreliable indoors and Nav2 uses the LiDAR only'),
+        DeclareLaunchArgument('use_eyes', default_value='true',
+                              description='Start eyes_node here. The control panel sets this to false '
+                                          'and supervises eyes_node itself so it can be toggled live'),
 
         # Robot description / TF tree
         IncludeLaunchDescription(
@@ -86,5 +91,6 @@ def generate_launch_description():
             executable='eyes_node',
             name='eyes_node',
             output='screen',
+            condition=IfCondition(use_eyes),
         ),
     ])

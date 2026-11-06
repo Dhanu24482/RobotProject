@@ -1,0 +1,67 @@
+/* Immersive layout — the map fills the screen; every control floats on frosted glass above it. */
+
+html, body { height: 100%; overflow: hidden; }
+.world { position: fixed; inset: 0; }
+.world .map-stage { position: absolute; inset: 0; min-height: 0; }
+
+.hud-top {
+  position: fixed; z-index: 10; left: 14px; right: 14px; top: calc(14px + env(safe-area-inset-top));
+  display: flex; align-items: center; gap: 12px; padding: 9px 12px 9px 18px; border-radius: 999px;
+}
+.hud-top .url { width: 240px; min-height: 38px; border-radius: 999px; }
+.hud-top .btn { border-radius: 999px; min-height: 38px; }
+.sep { width: 1px; height: 22px; background: var(--line-2); }
+
+.hud-rail {
+  position: fixed; z-index: 10; right: 14px; top: 50%; transform: translateY(-50%);
+  display: grid; gap: 10px; padding: 8px; border-radius: var(--r-lg); width: 112px;
+}
+.hud-rail .seg { background: transparent; border: 0; padding: 0; gap: 6px; }
+.hud-rail .seg-btn { min-height: 44px; }
+.hud-rail .btn { min-height: 44px; padding: 0 8px; font-size: 12px; }
+.hud-rail hr { border: 0; height: 1px; background: var(--line-2); margin: 2px 0; }
+
+.hint {
+  position: fixed; z-index: 9; left: 50%; transform: translateX(-50%); bottom: calc(176px + env(safe-area-inset-bottom));
+  padding: 8px 15px; border-radius: 999px; font: 500 12px var(--font); color: var(--dim); pointer-events: none;
+}
+.hint:empty { display: none; }
+
+.hud-bottom {
+  position: fixed; z-index: 10; left: 14px; right: 138px; bottom: calc(14px + env(safe-area-inset-bottom));
+  display: flex; align-items: stretch; gap: 10px;
+}
+.hud-bottom .panel { padding: 12px 15px; display: grid; gap: 6px; align-content: center; border-radius: var(--r-lg); min-width: 0; }
+.hud-bottom .panel .eyebrow { font-size: 10px; }
+.hud-bottom .val { font: 600 20px/1.1 var(--mono); letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.hud-bottom .val.txt { font: 700 17px/1.1 var(--font); letter-spacing: -.01em; }
+.hud-bottom .grow-panel { flex: 1 1 0; }
+.hud-bottom .emo-grid { grid-template-columns: repeat(6, 1fr); gap: 5px; }
+.hud-bottom .emo-btn { min-height: 38px; aspect-ratio: auto; min-width: 0; border-radius: 11px; }
+.hud-bottom .emo-btn svg { width: 62%; }
+
+@media (max-width: 980px) {
+  .hud-bottom { flex-wrap: wrap; right: 14px; bottom: calc(14px + env(safe-area-inset-bottom)); }
+  .hud-bottom .panel.stat { display: none; }
+  /* phone / small tablet: the rail becomes two tidy rows above the bottom panels (modes, then the four tool buttons) */
+  .hud-rail { top: auto; bottom: 150px; left: 14px; right: 14px; transform: none; width: auto;
+              display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 6px; }
+  .hud-rail .seg { grid-column: 1 / -1; grid-auto-flow: column; }
+  .hud-rail hr { display: none; }
+  .hud-rail .btn { padding: 0 6px; }
+  .hud-top .url { display: none; }
+  .hint { bottom: calc(270px + env(safe-area-inset-bottom)); }
+}
+
+@media (max-width: 640px) {
+  .hud-top { gap: 8px; padding: 8px 10px 8px 14px; left: 10px; right: 10px; }
+  .hud-top .bn, .hud-top .sep { display: none; }
+  .hud-top .btn { padding: 0 12px; }
+  .hud-bottom { left: 10px; right: 10px; gap: 8px; }
+  .hud-bottom .pad .dpad-row { gap: 4px; }
+  .hud-bottom .pad .dpad-row .dp { width: 44px; }
+  .hud-bottom .grow-panel { flex: 1 1 100%; }
+  .hud-rail { left: 10px; right: 10px; bottom: 292px; }
+  .hud-rail .lbl { display: none; }
+  .hint { bottom: calc(412px + env(safe-area-inset-bottom)); }
+}

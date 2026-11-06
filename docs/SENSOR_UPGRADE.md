@@ -84,7 +84,7 @@ single bad frame cannot permanently block a route.
 - [`src/omni_base/omni_base/voice_node.py`](../src/omni_base/omni_base/voice_node.py) — look/hands commands, Gemini key rotation.
 - [`src/omni_base/urdf/omniserv.urdf`](../src/omni_base/urdf/omniserv.urdf) — sensor TF frames.
 - [`src/omni_base/config/nav2_params.yaml`](../src/omni_base/config/nav2_params.yaml) — local-costmap sensor layers.
-- [`src/omni_base/web_interface/index.html`](../src/omni_base/web_interface/index.html) — full dashboard.
+- [`src/omni_base/web_interface/layouts/`](../src/omni_base/web_interface/layouts/) — the dashboard layouts.
 - [`ENVIRONMENT_SETUP.md`](../ENVIRONMENT_SETUP.md) — arduino-cli install, rotating API keys.
 
 ---

@@ -18,6 +18,7 @@ setup(
         (os.path.join('share', package_name, 'config'), glob('config/*.yaml')),
         (os.path.join('share', package_name, 'urdf'),   glob('urdf/*.urdf')),
         (os.path.join('share', package_name, 'maps'),   glob('maps/*')),
+        (os.path.join('share', package_name, 'web_remote'), glob('web_remote/*')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -34,6 +35,7 @@ setup(
         'console_scripts': [
             'arduino_bridge   = omni_base.arduino_bridge:main',
             'voice_node       = omni_base.voice_node:main',
+            'remote_node      = omni_base.remote_node:main',
             'location_manager = omni_base.location_manager:main',
             'eyes_node        = omni_base.eyes_node:main',
         ],

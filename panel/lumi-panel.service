@@ -1,0 +1,20 @@
+[Unit]
+Description=Lumi robot control panel (starts/stops the ROS stack, serves the robot web and voice page)
+After=network.target
+
+[Service]
+Type=simple
+User=@USER@
+Group=@USER@
+WorkingDirectory=@WS@/panel
+Environment=PYTHONUNBUFFERED=1
+# Audio (TTS) and the user runtime dir for processes the panel launches.
+Environment=XDG_RUNTIME_DIR=/run/user/@UID@
+ExecStart=/usr/bin/python3 -m lumi_panel
+Restart=always
+RestartSec=3
+KillMode=control-group
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

@@ -76,6 +76,18 @@ function setField(name, value, state) {
 
 function setBody(attr, value) { document.body.setAttribute(attr, value); }
 
+// A CSS colour (hex, rgb(), named) -> [r, g, b], resolved through the browser itself.
+var _rgbCtx = null;
+function themeRGB(varName, fallback) {
+  if (!_rgbCtx) _rgbCtx = document.createElement('canvas').getContext('2d');
+  _rgbCtx.fillStyle = '#000';
+  _rgbCtx.fillStyle = themeColor(varName, fallback);
+  var m = /^#([0-9a-f]{6})$/i.exec(_rgbCtx.fillStyle);
+  if (m) { var n = parseInt(m[1], 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
+  m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(_rgbCtx.fillStyle);
+  return m ? [+m[1], +m[2], +m[3]] : [0, 0, 0];
+}
+
 function themeColor(varName, fallback) {
   var v = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
   return v || fallback;
@@ -123,12 +135,8 @@ var banner = null, bannerText = null, bannerInput = null;
 function buildBanner() {
   if (banner) return;
   banner = document.createElement('div');
-  banner.style.cssText =
-    'position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:2147483647;' +
-    'max-width:min(720px,94vw);padding:13px 18px;border-radius:13px;' +
-    'background:#7f1d1d;color:#fff;border:1px solid #ef4444;' +
-    "font:500 13px/1.45 Inter,system-ui,sans-serif;box-shadow:0 10px 30px rgba(0,0,0,.5);" +
-    'display:none;gap:11px;align-items:center;flex-wrap:wrap;';
+  banner.className = 'lumi-banner';
+  banner.setAttribute('role', 'alert');
 
   bannerText = document.createElement('span');
   banner.appendChild(bannerText);
@@ -136,9 +144,7 @@ function buildBanner() {
   bannerInput = document.createElement('input');
   bannerInput.type = 'text';
   bannerInput.spellcheck = false;
-  bannerInput.style.cssText =
-    'background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.35);color:#fff;' +
-    'padding:7px 11px;border-radius:8px;font:inherit;width:210px;outline:none;';
+  bannerInput.setAttribute('aria-label', 'rosbridge address');
   bannerInput.addEventListener('keydown', function (e) {
     if (e.key === 'Enter') retryFromBanner();
   });
@@ -146,9 +152,6 @@ function buildBanner() {
 
   var go = document.createElement('button');
   go.textContent = 'Connect';
-  go.style.cssText =
-    'background:#fff;color:#7f1d1d;border:none;padding:8px 16px;border-radius:8px;' +
-    'font:600 13px Inter,system-ui,sans-serif;cursor:pointer;';
   go.addEventListener('click', retryFromBanner);
   banner.appendChild(go);
 
@@ -167,7 +170,7 @@ function showBanner(msg, url) {
   buildBanner();
   bannerText.textContent = msg;
   if (url !== undefined) bannerInput.value = url;
-  bannerInput.style.display = url === null ? 'none' : '';
+  bannerInput.hidden = url === null;
   banner.style.display = 'flex';
 }
 
@@ -183,16 +186,19 @@ function savedUrl() {
   try { return localStorage.getItem(STORAGE_URL) || ''; } catch (e) { return ''; }
 }
 
-// Served from the Pi, the page's own host is the robot. Previewed from a laptop
-// on localhost or opened from a file:// bookmark it is definitely not, and
-// ws://192.168.43.221:9090 is a guaranteed-dead guess — fall back to the Pi's usual
-// address so the field starts somewhere useful.
+// Where rosbridge is, in order of preference:
+//  1. served by the Lumi control panel (/robot/...): through the panel's /rosbridge
+//     pass-through, same origin and same port, so it also works behind a tunnel;
+//  2. served from the Pi some other way: the page's own host, port 9090;
+//  3. previewed from a laptop (localhost / file://): the Pi's usual address.
 var FALLBACK_HOST = '192.168.43.221';
 
 function defaultUrl() {
+  var proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+  if (location.pathname.indexOf('/robot/') === 0) return proto + location.host + '/rosbridge';
   var host = location.hostname;
-  var localPreview = !host || host === 'localhost' || host === '192.168.43.221' || host === '[::1]';
-  return 'ws://192.168.43.221:9090';
+  var localPreview = !host || host === 'localhost' || host === '[::1]' || host === '127.0.0.1';
+  return localPreview ? 'ws://' + FALLBACK_HOST + ':9090' : 'ws://' + host + ':9090';
 }
 
 function currentUrl() {
@@ -203,8 +209,8 @@ function currentUrl() {
 
 function connect() {
   if (typeof ROSLIB === 'undefined') {
-    toast('roslib failed to load — check the tablet\'s internet connection');
-    log('ROSLIB missing. The CDN scripts did not load.', 'e');
+    toast('roslib failed to load');
+    log('ROSLIB missing: lib/roslib.min.js did not load (is the lib folder deployed next to this page?).', 'e');
     return;
   }
   var url = currentUrl();
@@ -225,7 +231,7 @@ function connect() {
     try { localStorage.setItem(STORAGE_URL, url); } catch (e) { /* private mode */ }
     setBody('data-connected', 'true');
     setField('conn', 'Online', 'ok');
-    setField('rosurl', url.replace('ws://', '').replace(':9090', ''), 'ok');
+    setField('rosurl', url.replace(/^wss?:\/\//, '').replace(':9090', ''), 'ok');
     hideBanner();
     log('Connected to rosbridge.', 'o');
     toast('Connected');
@@ -299,7 +305,7 @@ function setupTopics() {
     .subscribe(function (msg) { setField('voice', msg.data); log('Heard: "' + msg.data + '"', 'i'); });
 
   new ROSLIB.Topic({ ros: ros, name: '/robot/emotion', messageType: 'std_msgs/String' })
-    .subscribe(function (msg) { setField('emotion', msg.data); setBody('data-emotion', msg.data); });
+    .subscribe(function (msg) { markEmotion(msg.data); });
 
   // Runtime-saved points from location_manager (latched JSON).
   new ROSLIB.Topic({ ros: ros, name: '/saved_locations', messageType: 'std_msgs/String' })
@@ -398,7 +404,7 @@ function render() {
 
   if (!mapData || !mapInfo) {
     ctx.fillStyle = themeColor('--dim', '#94a3b8');
-    ctx.font = '14px Inter, system-ui, sans-serif';
+    ctx.font = '500 14px Inter, system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText(connected ? 'Waiting for /map …' : 'Not connected to the robot',
                  s.w / 2, s.h / 2);
@@ -407,12 +413,11 @@ function render() {
 
   var W = mapInfo.width, H = mapInfo.height;
   var img = ctx.createImageData(W, H);
+  var cUnknown = themeRGB('--map-unknown', '#0b1220'), cWall = themeRGB('--map-wall', '#020617'), cFree = themeRGB('--map-free', '#dfe7f3');
   for (var i = 0; i < mapData.length; i++) {
-    var v = mapData[i], r, g, b;
-    if (v === -1)      { r = 17; g = 24;  b = 39;  }   // unknown
-    else if (v >= 65)  { r = 2;  g = 6;   b = 23;  }   // occupied
-    else               { r = 226; g = 232; b = 240; }  // free
-    img.data[i * 4] = r; img.data[i * 4 + 1] = g; img.data[i * 4 + 2] = b; img.data[i * 4 + 3] = 255;
+    var v = mapData[i];
+    var c = v === -1 ? cUnknown : (v >= 65 ? cWall : cFree);   // unknown / occupied / free
+    img.data[i * 4] = c[0]; img.data[i * 4 + 1] = c[1]; img.data[i * 4 + 2] = c[2]; img.data[i * 4 + 3] = 255;
   }
   var off = document.createElement('canvas');
   off.width = W; off.height = H;
@@ -433,7 +438,7 @@ function render() {
     ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
     ctx.fillStyle = green; ctx.fill();
     ctx.fillStyle = themeColor('--text', '#f8fafc');
-    ctx.font = '11px Inter, system-ui, sans-serif';
+    ctx.font = '600 11px Inter, system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText(key, p.x, p.y - 10);
   });
@@ -447,7 +452,7 @@ function render() {
 function drawRobot(cx, cy, yaw, color) {
   ctx.save(); ctx.translate(cx, cy); ctx.rotate(yaw);
   ctx.beginPath(); ctx.arc(0, 0, 13, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(16,185,129,0.25)'; ctx.fill();
+  var rgb = themeRGB('--green', '#10b981'); ctx.fillStyle = 'rgba(' + rgb.join(',') + ',0.25)'; ctx.fill();
   ctx.strokeStyle = color; ctx.lineWidth = 2.5; ctx.stroke();
   ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(18, 0);
   ctx.strokeStyle = color; ctx.lineWidth = 3; ctx.stroke();
@@ -714,6 +719,11 @@ function setSpeed(pwm) {
   toast('Speed ' + v);
 }
 
+function markEmotion(name) {
+  setField('emotion', name); setBody('data-emotion', name);
+  all('[data-emotion]').forEach(function (el) { el.classList.toggle('act', el.getAttribute('data-emotion') === name); });
+}
+
 function setEmotion(name) {
   if (!requireConnection()) return;
   pubs.emotion.publish(new ROSLIB.Message({ data: name }));
@@ -779,7 +789,185 @@ function zoom(f) {
 
 function resetView() { fitView(); render(); }
 
+// ── Components ───────────────────────────────────────────────────────────────────────────────
+// One definition per control set. Layouts only say WHERE a set goes:
+//   <div class="emo-grid" data-lumi="emotion-buttons"></div>     (optional: data-only="happy,love,sad")
+// so adding an expression or a body move is a one-line change here, not an edit in every layout.
+
+// Each expression is drawn as the pair of eyes the robot actually shows (no emoji: those depend on the
+// device's fonts and some, e.g. star eyes, are missing on older tablets). viewBox 0 0 44 26; currentColor.
+var ST = ' fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"';
+var PILL = '<rect x="7" y="4" width="9" height="18" rx="4.5" fill="currentColor"/>';
+var HEART = '<path d="M7 13S0 9 0 4.5C0-1.5 7-1.5 7 3c0-4.5 7-4.5 7 1.5C14 9 7 13 7 13Z" fill="currentColor"/>';
+var STAR = '<polygon points="11,4.5 13.3,9.6 18.9,10.2 14.7,13.9 15.9,19.4 11,16.6 6.1,19.4 7.3,13.9 3.1,10.2 8.7,9.6" fill="currentColor"/>';
+var SWIRL = '<path d="M11 13a1.6 1.6 0 0 1 3.2 0 3.4 3.4 0 0 1-6.8 0 5.2 5.2 0 0 1 10.4 0 7 7 0 0 1-14 0"' + ST.replace('3.4', '2.2') + '/>';
+var EYES = {
+  neutral:   PILL + '<rect x="29" y="4" width="9" height="18" rx="4.5" fill="currentColor"/>',
+  happy:     '<path d="M5 18q6.5-14 13 0M26 18q6.5-14 13 0"' + ST + '/>',
+  sad:       '<path d="M5 11l12-5M39 11l-12-5"' + ST + '/><ellipse cx="11" cy="17" rx="3.6" ry="4.6" fill="currentColor"/><ellipse cx="33" cy="17" rx="3.6" ry="4.6" fill="currentColor"/>',
+  angry:     '<path d="M5 5l12 6M39 5l-12 6"' + ST + '/><ellipse cx="11" cy="17.5" rx="3.6" ry="4.4" fill="currentColor"/><ellipse cx="33" cy="17.5" rx="3.6" ry="4.4" fill="currentColor"/>',
+  surprised: '<circle cx="11" cy="13" r="6.2"' + ST.replace('3.4', '3') + '/><circle cx="33" cy="13" r="6.2"' + ST.replace('3.4', '3') + '/>',
+  love:      '<g transform="translate(4 6)">' + HEART + '</g><g transform="translate(26 6)">' + HEART + '</g>',
+  excited:   STAR + '<g transform="translate(22 0)">' + STAR + '</g>',
+  wink:      '<path d="M5 18q6.5-14 13 0"' + ST + '/><rect x="29" y="4" width="9" height="18" rx="4.5" fill="currentColor"/>',
+  blink:     '<path d="M5 13h13M26 13h13"' + ST + '/>',
+  sleepy:    '<path d="M5 11q6.5 9 13 0M26 11q6.5 9 13 0"' + ST + '/>',
+  dizzy:     SWIRL + '<g transform="translate(22 0)">' + SWIRL + '</g>'
+};
+var EMOTIONS = [
+  ['happy', 'Happy'], ['neutral', 'Neutral'], ['sad', 'Sad'], ['angry', 'Angry'], ['surprised', 'Surprised'],
+  ['love', 'Heart eyes'], ['excited', 'Star eyes'], ['wink', 'Wink'], ['blink', 'Blink'], ['sleepy', 'Sleepy'], ['dizzy', 'Dizzy']
+];
+var BODY_MOVES = [
+  ['NOD', 'Nod'], ['SHAKE', 'Shake'], ['CENTER', 'Center'], ['WAVE:L', 'Wave left'], ['WAVE:R', 'Wave right'],
+  ['SALUTE', 'Salute'], ['LOOK:C', 'Look ahead'], ['WRIST:UP', 'Wrist up'], ['WRIST:CENTER', 'Wrist middle'],
+  ['WRIST:DOWN', 'Wrist down'], ['WRIST:TEST', 'Wrist test']
+];
+var MAP_MODES = [['goal', 'Send goal'], ['add', 'Save spot'], ['teleop', 'Pan map'], ['pose', 'Set pose']];
+var ARROW = {
+  up: '<path d="M6 15l6-6 6 6"/>', down: '<path d="M6 9l6 6 6-6"/>',
+  left: '<path d="M15 6l-6 6 6 6"/>', right: '<path d="M9 6l6 6-6 6"/>', stop: '<rect x="5" y="5" width="14" height="14" rx="3"/>'
+};
+
+function pick(host, list) {
+  var only = host.getAttribute('data-only');
+  if (!only) return list;
+  var want = only.split(',').map(function (x) { return x.trim(); });
+  return want.map(function (id) { return list.filter(function (x) { return x[0] === id; })[0]; }).filter(Boolean);
+}
+function el(tag, cls, attrs, text) {
+  var e = document.createElement(tag);
+  if (cls) e.className = cls;
+  Object.keys(attrs || {}).forEach(function (k) { e.setAttribute(k, attrs[k]); });
+  if (text) e.textContent = text;
+  return e;
+}
+
+function buildComponents() {
+  fields('emotion-buttons').forEach(function (host) {
+    host.innerHTML = '';
+    pick(host, EMOTIONS).forEach(function (x) {
+      var b = el('button', 'emo-btn', { type: 'button', 'data-emotion': x[0], title: x[1], 'aria-label': x[1] });
+      b.innerHTML = '<svg viewBox="0 0 44 26" aria-hidden="true">' + EYES[x[0]] + '</svg>';
+      host.appendChild(b);
+    });
+  });
+  fields('body-buttons').forEach(function (host) {
+    host.innerHTML = '';
+    BODY_MOVES.forEach(function (x) { host.appendChild(el('button', 'chip', { type: 'button', 'data-body': x[0] }, x[1])); });
+  });
+  fields('mode-buttons').forEach(function (host) {
+    host.innerHTML = '';
+    if (!host.classList.contains('seg')) host.classList.add('seg');
+    pick(host, MAP_MODES).forEach(function (x) { host.appendChild(el('button', 'seg-btn', { type: 'button', 'data-mode': x[0] }, x[1])); });
+  });
+  fields('dpad').forEach(function (host) {
+    host.innerHTML = '';
+    var row = host.getAttribute('data-variant') === 'row';          // compact one-row pad for narrow bars
+    host.classList.add(row ? 'dpad-row' : 'dpad');
+    var cells = row
+      ? [['left', '0,1', 'Turn left'], ['up', '1,0', 'Forward'], ['stop', '0,0', 'Stop'], ['down', '-1,0', 'Backward'], ['right', '0,-1', 'Turn right']]
+      : [null, ['up', '1,0', 'Forward'], null, ['left', '0,1', 'Turn left'], ['stop', '0,0', 'Stop'], ['right', '0,-1', 'Turn right'],
+         null, ['down', '-1,0', 'Backward'], null];
+    cells.forEach(function (c) {
+      if (!c) { host.appendChild(el('div')); return; }
+      var b = el('div', 'dp' + (c[0] === 'stop' ? ' stop' : ''), { 'data-drive': c[1], role: 'button', tabindex: '0', 'aria-label': c[2] });
+      b.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' + ARROW[c[0]] + '</svg>';
+      host.appendChild(b);
+    });
+  });
+  fields('speed-controls').forEach(function (host) {
+    host.innerHTML = '';
+    [['lin-speed', 'lin-value', 'Forward speed', 'm/s', 0.05, 0.5, 0.05, 0.2],
+     ['ang-speed', 'ang-value', 'Turn speed', 'rad/s', 0.1, 1.5, 0.1, 0.5]].forEach(function (d) {
+      var wrap = el('div', 'slider'), head = el('div', 'slider-head');
+      head.appendChild(el('span', '', {}, d[2]));
+      var b = el('b'); b.innerHTML = '<span data-lumi="' + d[1] + '">' + d[7].toFixed(2) + '</span> ' + d[3];
+      head.appendChild(b); wrap.appendChild(head);
+      wrap.appendChild(el('input', '', { type: 'range', 'data-lumi': d[0], min: d[4], max: d[5], step: d[6], value: d[7], 'aria-label': d[2] }));
+      host.appendChild(wrap);
+    });
+    var w = el('div', 'slider'), h = el('div', 'slider-head');
+    h.appendChild(el('span', '', {}, 'Robot speed'));
+    var bb = el('b'); bb.innerHTML = '<span data-lumi="motor-power-value">30</span> PWM <span data-lumi="motor-power-pct">12%</span>';
+    h.appendChild(bb); w.appendChild(h);
+    w.appendChild(el('input', '', { type: 'range', 'data-lumi': 'motor-power', min: 20, max: 255, step: 5, value: 30, 'aria-label': 'Robot speed (PWM)' }));
+    w.appendChild(el('div', 'slider-note', {}, 'Applies to every mode: Nav2, voice and Bluetooth.'));
+    host.appendChild(w);
+  });
+}
+
+/** Tabs: <button data-tab="go"> shows <section data-tabpanel="go">. The first tab is open at start. */
+function bindTabs() {
+  var tabs = all('[data-tab]');
+  if (!tabs.length) return;
+  function show(name) {
+    tabs.forEach(function (t) { t.setAttribute('aria-selected', String(t.getAttribute('data-tab') === name)); });
+    all('[data-tabpanel]').forEach(function (p) { p.hidden = p.getAttribute('data-tabpanel') !== name; });
+  }
+  tabs.forEach(function (t) {
+    t.setAttribute('role', 'tab');
+    t.addEventListener('click', function () { show(t.getAttribute('data-tab')); });
+  });
+  show(tabs[0].getAttribute('data-tab'));
+}
+
+/** Slide-over panels: <button data-open="settings"> opens <div id="settings" class="overlay">; data-close or a tap on the
+ *  backdrop closes it; Escape closes whatever is open. */
+function bindOverlays() {
+  all('[data-open]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var o = document.getElementById(b.getAttribute('data-open'));
+      if (o) { o.classList.add('open'); var f = o.querySelector('input,button,select'); if (f && matchMedia('(pointer:fine)').matches) f.focus(); }
+    });
+  });
+  all('.overlay').forEach(function (o) {
+    o.addEventListener('click', function (e) { if (e.target === o) o.classList.remove('open'); });
+  });
+  all('[data-close]').forEach(function (b) {
+    b.addEventListener('click', function () { var o = b.closest('.overlay'); if (o) o.classList.remove('open'); });
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') all('.overlay.open').forEach(function (o) { o.classList.remove('open'); });
+  });
+}
+
+/** Range sliders paint their filled part up to the thumb through --p. */
+function bindRangeFill() {
+  all('input[type="range"]').forEach(function (r) {
+    var paint = function () { var lo = +r.min || 0, hi = +r.max || 100; r.style.setProperty('--p', (100 * (r.value - lo) / (hi - lo)) + '%'); };
+    r.addEventListener('input', paint); paint();
+  });
+}
+
 // ── Declarative wiring ───────────────────────────────────────────────────────
+
+// ── Fullscreen ───────────────────────────────────────────────────────────────────────────────
+// Every page has a fullscreen button (data-action="fullscreen"). The body carries data-fullscreen="on|off|unsupported"
+// so the icon can flip, and so the button can hide itself where the browser cannot do it (iPhone Safari).
+
+function fsElement() { return document.fullscreenElement || document.webkitFullscreenElement || null; }
+
+function toggleFullscreen() {
+  var de = document.documentElement;
+  if (fsElement()) {
+    (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+    return;
+  }
+  var req = de.requestFullscreen || de.webkitRequestFullscreen;
+  if (!req) { toast('This browser cannot go fullscreen'); return; }
+  var p = req.call(de);
+  if (p && p.catch) p.catch(function () { toast('The browser blocked fullscreen'); });
+}
+
+function bindFullscreen() {
+  var can = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+  setBody('data-fullscreen', can ? 'off' : 'unsupported');
+  if (!can) return;
+  var sync = function () { setBody('data-fullscreen', fsElement() ? 'on' : 'off'); };
+  document.addEventListener('fullscreenchange', sync);
+  document.addEventListener('webkitfullscreenchange', sync);
+}
 
 var ACTIONS = {
   connect: connect,
@@ -790,10 +978,7 @@ var ACTIONS = {
   'zoom-in': function () { zoom(1.25); },
   'zoom-out': function () { zoom(0.8); },
   fit: resetView,
-  fullscreen: function () {
-    if (document.fullscreenElement) document.exitFullscreen();
-    else document.documentElement.requestFullscreen().catch(function () {});
-  }
+  fullscreen: toggleFullscreen
 };
 
 function bindControls() {
@@ -804,6 +989,10 @@ function bindControls() {
     var parts = el.getAttribute('data-drive').split(',');
     var lin = parseFloat(parts[0]) || 0, ang = parseFloat(parts[1]) || 0;
     el.style.touchAction = 'none';
+    el.addEventListener('keydown', function (e) {
+      if ((e.key === 'Enter' || e.key === ' ') && !e.repeat) { e.preventDefault(); if (lin === 0 && ang === 0) stopMove(); else startMove(lin, ang); }
+    });
+    el.addEventListener('keyup', function (e) { if (e.key === 'Enter' || e.key === ' ') stopMove(); });
     el.addEventListener('pointerdown', function (e) {
       e.preventDefault();
       el.setPointerCapture(e.pointerId);
@@ -874,6 +1063,7 @@ function bindKeyboard() {
   };
   document.addEventListener('keydown', function (e) {
     if (/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
+    if (e.key === 'f' || e.key === 'F') { if (!e.ctrlKey && !e.metaKey && !e.altKey) toggleFullscreen(); return; }
     if (e.key === ' ') { stopMove(); e.preventDefault(); return; }
     var k = keys[e.key];
     if (k && !moveInterval) startMove(k[0], k[1]);
@@ -893,7 +1083,12 @@ function init(opts) {
   canvas = document.getElementById(opts.canvas || 'mapCanvas');
   if (canvas) { ctx = canvas.getContext('2d'); bindCanvas(); }
 
+  buildComponents();
+  bindFullscreen();
   bindControls();
+  bindTabs();
+  bindOverlays();
+  bindRangeFill();
   bindKeyboard();
   populateRooms();
 
@@ -919,8 +1114,18 @@ function init(opts) {
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
+var started = false;
+function autoStart() {
+  if (started || !document.body.hasAttribute('data-lumi-app')) return;
+  started = true;
+  init({ canvas: document.body.getAttribute('data-lumi-app') || 'mapCanvas',
+         autoConnect: document.body.getAttribute('data-autoconnect') !== 'false' });
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', autoStart);
+else autoStart();
+
 global.LUMI = {
-  init: init,
+  init: function (o) { started = true; init(o); },
   connect: connect,
   disconnect: disconnect,
   sendGoal: sendGoal,

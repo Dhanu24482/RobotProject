@@ -1,0 +1,54 @@
+/* Kiosk layout — a public tablet. Huge destination tiles, plain language, one big stop button.
+   Staff-only controls (connection, manual drive) live behind the gear. */
+
+html, body { min-height: 100%; }
+body { display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; }
+
+.bar { display: flex; align-items: center; gap: 14px; padding: 16px clamp(18px, 3vw, 34px); padding-top: calc(16px + env(safe-area-inset-top)); }
+.bar .brand { font-size: 22px; }
+.bar .conn { min-height: 38px; font-size: 14px; }
+.bar .icon-btn { width: 48px; height: 48px; font-size: 22px; }
+
+.main {
+  flex: 1; display: grid; gap: clamp(16px, 2.4vw, 30px); padding: 4px clamp(18px, 3vw, 34px) clamp(18px, 3vw, 34px);
+  padding-bottom: calc(clamp(18px, 3vw, 34px) + env(safe-area-inset-bottom));
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 400px); align-items: start;
+}
+.dest h2 { font: 800 clamp(28px, 4vw, 44px)/1.1 var(--font); letter-spacing: -.03em; margin-bottom: 6px; }
+.dest p { color: var(--dim); font-size: 16px; margin-bottom: 22px; }
+
+/* big tiles: override the shared room button */
+.dest .room-grid { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px; }
+.dest .room-btn {
+  min-height: 108px; padding: 18px 20px; flex-direction: column; align-items: flex-start; justify-content: flex-end; gap: 12px;
+  border-radius: var(--r-lg); font: 700 22px/1.1 var(--font); letter-spacing: -.01em;
+  background: linear-gradient(160deg, var(--surface-3), var(--surface));
+}
+.dest .room-btn::before { width: 14px; height: 14px; }
+.dest .room-btn:active { transform: scale(.96); background: var(--accent-soft); border-color: var(--accent); }
+
+.side { display: grid; gap: 16px; }
+.mini-map { height: clamp(200px, 30vh, 300px); border-radius: var(--r-lg); border: 1px solid var(--line-2); box-shadow: var(--lift); }
+.mini-map canvas { cursor: default; }
+.status-card { padding: 16px 18px; border-radius: var(--r-lg); background: var(--surface); border: 1px solid var(--line); }
+.status-card .navchip { font-size: 30px; }
+.status-card .sub { margin-top: 6px; color: var(--dim); font: 500 13px var(--mono); }
+.hello { display: grid; gap: 10px; }
+.hello .emo-grid { grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.hello .emo-btn { min-height: 64px; border-radius: 18px; }
+.big-stop { min-height: 76px; font-size: 20px; border-radius: var(--r-lg); }
+
+@media (max-width: 860px) {
+  .main { grid-template-columns: minmax(0, 1fr); }
+  .dest .room-grid { grid-template-columns: repeat(2, 1fr); }
+  .dest .room-btn { min-height: 92px; font-size: 19px; }
+  .side { order: -1; }
+  .mini-map { height: 200px; }
+}
+
+@media (max-width: 520px) {
+  .bar { gap: 8px; padding-inline: 14px; }
+  .bar .brand { font-size: 19px; }
+  .bar .icon-btn { width: 44px; height: 44px; }
+  .bar .conn { padding: 0 10px 0 9px; font-size: 13px; }
+}

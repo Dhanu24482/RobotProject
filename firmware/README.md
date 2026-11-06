@@ -120,7 +120,10 @@ Two links: `Serial` (USB, 115200) to the Pi/ROS2, and `Serial3` (9600) to the HC
 | `<NOD>` `<SHAKE>` `<EBLINK>` `<CENTER>` | Animations |
 | `<WAVE:L>` `<WAVE:R>` | Wave a hand — shoulder lifts, elbow holds, wrist flicks |
 | `<HOME>` `<HAND_UP>` `<HAND_DOWN>` | Arm poses (synchronized) |
-| `<PULL_UP>` `<PULL_DOWN>` `<SALUTE>` | Arm poses |
+| `<SALUTE>` | Arm pose |
+| `<PULL_UP>` `<PULL_DOWN>` | **Disabled** (ignored): they drove shoulder roll/elbow to full travel and swung the arms into the torso |
+
+> **Shoulder-roll clamp:** every arm move is limited to `ARM_ROLL_MIN`/`ARM_ROLL_MAX` (75–105, provisional). The arms hang almost against the torso, so measure the real contact angles by stepping the roll in small increments, then set the window a few degrees short of them.
 | `<GOODBYE>` | Salute, hold, wave the raised wrist, return home |
 | `<HP:90>` | Head pan angle |
 | `<EL:80>` `<ER:100>` `<EY:x,y>` | Eye servos |

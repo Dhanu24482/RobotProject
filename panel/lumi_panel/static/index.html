@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#070b13">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Lumi Control Panel</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <header>
+    <div class="brand"><i class="brand-eyes"></i><h1>Lumi</h1><span id="sys-pill" class="pill">&hellip;</span></div>
+    <button id="estop" class="estop" type="button" title="Stop all motion now">STOP</button>
+  </header>
+  <div id="banner" class="banner" hidden></div>
+
+  <nav id="tabs">
+    <button data-tab="overview" class="on">Overview</button>
+    <button data-tab="components">Components</button>
+    <button data-tab="maps">Maps</button>
+    <button data-tab="settings">Settings</button>
+    <button data-tab="logs">Logs</button>
+    <button data-tab="rviz">RViz2</button>
+    <a href="/robot/" class="tablink">Robot web &#8599;</a>
+    <a href="/voice/" class="tablink">Voice page &#8599;</a>
+  </nav>
+
+  <main>
+    <!-- Overview -->
+    <section id="tab-overview" class="tab">
+      <div class="card">
+        <h2>System</h2>
+        <div class="row">
+          <label>Mode
+            <select id="mode">
+              <option value="off">Off (nothing)</option>
+              <option value="hardware">Hardware only</option>
+              <option value="mapping">Mapping (SLAM)</option>
+              <option value="navigation">Navigation (on a map)</option>
+            </select>
+          </label>
+          <label id="map-wrap">Map <select id="map-select"></select></label>
+        </div>
+        <div class="row actions">
+          <button id="btn-start" class="primary" type="button">Start system</button>
+          <button id="btn-restart" type="button">Restart</button>
+          <button id="btn-stop" type="button">Stop</button>
+        </div>
+        <p id="restart-note" class="note" hidden></p>
+        <div id="core-msg" class="note warn" hidden></div>
+      </div>
+      <div class="card"><h2>Status</h2><div id="proc-list" class="plist"></div></div>
+      <div class="card"><h2>Raspberry Pi</h2><div id="health" class="kv"></div></div>
+    </section>
+
+    <!-- Components -->
+    <section id="tab-components" class="tab" hidden>
+      <p class="muted">Switch features on or off. While the system is running a change takes effect immediately; the robot core is controlled from the Overview tab.</p>
+      <div id="comp-list"></div>
+    </section>
+
+    <!-- Maps -->
+    <section id="tab-maps" class="tab" hidden>
+      <div class="card">
+        <h2>Save the map being built</h2>
+        <p class="muted">Start the system in <b>Mapping</b> mode, drive the robot around, then save here.</p>
+        <form id="save-map-form" class="row">
+          <input id="save-map-name" type="text" placeholder="map name (letters, digits, - _)" maxlength="40" autocapitalize="none" required>
+          <button class="primary" type="submit">Save map</button>
+        </form>
+        <p id="save-map-msg" class="note" hidden></p>
+      </div>
+      <div class="card">
+        <h2>Initial pose (after starting navigation)</h2>
+        <p class="muted">Tell the robot where it is on the map. Values are in metres / radians in the map frame.</p>
+        <form id="pose-form" class="row">
+          <input id="pose-x" type="number" step="any" value="0" aria-label="x"><input id="pose-y" type="number" step="any" value="0" aria-label="y"><input id="pose-yaw" type="number" step="any" value="0" aria-label="yaw">
+          <button type="submit">Set pose</button>
+        </form>
+        <p id="pose-msg" class="note" hidden></p>
+      </div>
+      <div id="map-grid" class="grid"></div>
+    </section>
+
+    <!-- Settings -->
+    <section id="tab-settings" class="tab" hidden>
+      <div class="card">
+        <h2>Gemini API keys</h2>
+        <p class="muted">Keys are write-only: they are stored on the robot and never shown in full. Voice rotates through them when one is rate-limited. Restart voice to apply.</p>
+        <div id="gemini-list"></div>
+        <form id="gemini-form" class="row"><input id="gemini-key" type="password" placeholder="Paste a new API key" autocomplete="off" spellcheck="false" required><button class="primary" type="submit">Add key</button></form>
+        <p id="gemini-msg" class="note" hidden></p>
+      </div>
+      <div class="card">
+        <h2>Robot parameters</h2>
+        <form id="launch-form"><div id="launch-fields" class="fields"></div><div class="row actions"><button class="primary" type="submit">Save</button></div></form>
+        <p id="launch-msg" class="note" hidden></p>
+      </div>
+      <div class="card">
+        <h2>Environment variables</h2>
+        <p class="muted">Passed to every ROS process. Allowed prefixes: <span id="env-prefixes"></span></p>
+        <div id="env-list"></div>
+        <form id="env-form" class="row"><input id="env-name" type="text" placeholder="NAME" autocapitalize="characters" required><input id="env-value" type="text" placeholder="value" autocomplete="off"><button type="submit">Set</button></form>
+        <p id="env-msg" class="note" hidden></p>
+      </div>
+      <div class="card">
+        <h2>Behaviour</h2>
+        <label class="check"><input id="opt-autostart" type="checkbox"> Start the system automatically when the Pi boots</label>
+        <label class="check"><input id="opt-autorestart" type="checkbox"> Restart a component if it crashes</label>
+        <h2>Network</h2>
+        <label class="check"><input id="opt-lan" type="checkbox"> Let other devices on the network open this panel, the robot web and the voice page</label>
+        <p class="note warn">There is no login. With this on, anyone who can reach the Pi's address (for example on campus Wi-Fi) can control the robot. Off = this Pi only, plus whatever you expose yourself through a tunnel. Applies after the panel restarts, which also stops the robot system.</p>
+        <div class="row actions"><button id="restart-panel" class="danger" type="button">Restart panel</button></div>
+        <h2>Allowed host names (optional)</h2>
+        <p class="muted">Leave empty to accept any. If set, requests for other names are refused (protects against DNS rebinding). One per line, e.g. <code>robot.example.com</code> or <code>*.example.com</code>. IP addresses and localhost always work.</p>
+        <textarea id="opt-hosts" rows="3" spellcheck="false"></textarea>
+        <div class="row actions"><button id="save-behaviour" class="primary" type="button">Save</button></div>
+        <p id="behaviour-msg" class="note" hidden></p>
+      </div>
+    </section>
+
+    <!-- Logs -->
+    <section id="tab-logs" class="tab" hidden>
+      <div class="card">
+        <div class="row">
+          <select id="log-name"></select>
+          <label class="check"><input id="log-prev" type="checkbox"> previous run</label>
+          <label class="check"><input id="log-follow" type="checkbox" checked> follow</label>
+        </div>
+        <pre id="log-view"></pre>
+      </div>
+    </section>
+
+    <!-- RViz -->
+    <section id="tab-rviz" class="tab" hidden>
+      <div class="card">
+        <h2>Remote RViz2 through the tunnel</h2>
+        <p class="muted">Run RViz2 on any Linux machine or WSL and see the robot's map, scan, TF and plan. A Zenoh bridge carries ROS 2 traffic over one TCP connection, which Cloudflare Tunnel can forward.</p>
+        <div id="rviz-status" class="kv"></div>
+        <div class="row actions">
+          <button id="rviz-install" type="button">Install bridge</button>
+          <button id="rviz-toggle" class="primary" type="button">Enable</button>
+        </div>
+        <p id="rviz-msg" class="note" hidden></p>
+      </div>
+      <div class="card">
+        <h2>Connection</h2>
+        <label>Tunnel TCP hostname <input id="rviz-host" type="text" placeholder="zenoh.example.com" autocapitalize="none" spellcheck="false"></label>
+        <label>ROS domain id on the other machine <input id="rviz-domain" type="number" min="0" max="232" step="1" value="0"></label>
+        <p class="muted">The script you download is built from these two fields (hostname and domain), so changing them here and downloading again is all it takes. Domain <b>0</b> means the other machine uses the robot's own domain, so ROS tools there need no extra setup.</p>
+        <div class="row actions"><button id="rviz-save" type="button">Save</button></div>
+        <h2>On the robot (one-time, Cloudflare dashboard)</h2>
+        <ol class="steps">
+          <li>Zero Trust &rarr; Networks &rarr; Tunnels &rarr; your tunnel &rarr; <b>Public hostname</b> &rarr; add <code id="rviz-host-echo">zenoh.example.com</code>.</li>
+          <li>Service type <b>TCP</b>, URL <code>127.0.0.1:7447</code> (use the number form, not <code>localhost</code>). Put a Cloudflare Access policy on it.</li>
+          <li>Enable the bridge here (needs the system running).</li>
+        </ol>
+        <h2>On the other Linux machine (headless is fine)</h2>
+        <ol class="steps">
+          <li><a id="rviz-dl" href="/rviz/lumi-rviz.sh" download>Download lumi-rviz.sh</a> and run <code id="rviz-cmd">bash lumi-rviz.sh</code></li>
+          <li>The script does the whole setup and then <b>checks everything end to end</b>: it installs <code>cloudflared</code> and the Zenoh bridge (once, nothing needs root), signs you in (a link to open in any browser), starts the tunnel and the bridge <b>in the background</b>, makes new terminals ready for RViz2 (a small block in <code>~/.bashrc</code>), confirms the robot is reachable and that scan / tf / map data really arrives, and exits. It never starts RViz2.</li>
+          <li><b>Run it again any time</b> (after a disconnect or restart): it only re-checks, and repairs just what is missing or unhealthy. Anything that works is left untouched.</li>
+          <li>Afterwards: <code>bash lumi-rviz.sh status</code> &middot; <code>topics</code> &middot; <code>test</code> (checks data really arrives) &middot; <code>diag</code> (a report to paste when something is wrong) &middot; <code>login</code> (the sign-in expires) &middot; <code>stop</code>.</li>
+          <li>To open RViz2: in a <b>new</b> terminal just run <code>rviz2</code> and add the displays you want (needs ROS 2 with <code>rmw_cyclonedds_cpp</code>). In the terminal you ran the script in, first run <code>source ~/.lumi-rviz/env.sh</code>, or use <code>bash lumi-rviz.sh rviz</code> from anywhere. <code>bash lumi-rviz.sh unsetup</code> removes the <code>~/.bashrc</code> block.</li>
+        </ol>
+        <h2>What crosses the tunnel</h2>
+        <p class="muted">Everything, both ways: every topic, service and action on the robot, under whatever name it has now or gets later. The tunnel only carries ROS traffic; it does not filter, rename or throttle anything. Who may use it is decided by Cloudflare Access on the hostname, so anyone allowed through can do on the robot what a program running on it can (including driving it). ROS tools on the other machine see the same topic list as on the robot; only node <i>names</i> are not forwarded.</p>
+      </div>
+    </section>
+  </main>
+  <div id="toast" class="toast" hidden></div>
+  <script src="/app.js"></script>
+</body>
+</html>

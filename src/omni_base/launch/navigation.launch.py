@@ -16,7 +16,15 @@ from launch.launch_description_sources import (
     AnyLaunchDescriptionSource,
 )
 from launch.substitutions import LaunchConfiguration, PythonExpression
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.actions import Node
+
+
+# Hardware tunables forwarded to hardware.launch.py (defaults live there).
+HARDWARE_ARGS = {
+    'wheel_separation': '0.35', 'max_speed': '0.26', 'max_pwm': '30', 'min_pwm': '20',
+    'publish_sensors': 'false', 'use_eyes': 'true',
+}
 
 
 def generate_launch_description():
@@ -33,6 +41,9 @@ def generate_launch_description():
     params_file  = LaunchConfiguration('params_file')
     use_voice    = LaunchConfiguration('use_voice')
     use_web      = LaunchConfiguration('use_web')
+    use_remote   = LaunchConfiguration('use_remote')
+    enable_mic   = LaunchConfiguration('enable_mic')
+    hw_args      = {name: LaunchConfiguration(name) for name in HARDWARE_ARGS}
 
     return LaunchDescription([
         DeclareLaunchArgument('lidar_port', default_value='/dev/rplidar',
@@ -47,6 +58,12 @@ def generate_launch_description():
                               description='Start the voice control node'),
         DeclareLaunchArgument('use_web', default_value='false',
                               description='Start the rosbridge websocket for the web UI'),
+        DeclareLaunchArgument('use_remote', default_value='false',
+                              description='Start the browser voice page standalone on 127.0.0.1:8088 (the control panel normally runs it)'),
+        DeclareLaunchArgument('enable_mic', default_value='true',
+                              description='Let voice_node listen on the local microphone'),
+
+        *[DeclareLaunchArgument(name, default_value=default) for name, default in HARDWARE_ARGS.items()],
 
         # Shared hardware (description + lidar + rf2o + arduino_bridge)
         IncludeLaunchDescription(
@@ -55,6 +72,7 @@ def generate_launch_description():
             launch_arguments={
                 'lidar_port': lidar_port,
                 'arduino_port': arduino_port,
+                **hw_args,
             }.items()
         ),
 
@@ -75,7 +93,18 @@ def generate_launch_description():
             executable='voice_node',
             name='voice_node',
             output='screen',
+            parameters=[{'enable_mic': ParameterValue(enable_mic, value_type=bool)}],
             condition=IfCondition(use_voice),
+        ),
+
+        # Optional browser remote: speech-to-text + parsing run in the user's browser,
+        # only validated actions arrive here. Expose via the Cloudflare tunnel.
+        Node(
+            package='omni_base',
+            executable='remote_node',
+            name='remote_node',
+            output='screen',
+            condition=IfCondition(use_remote),
         ),
 
         # Optional rosbridge websocket for the web dashboard

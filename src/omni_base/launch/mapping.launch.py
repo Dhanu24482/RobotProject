@@ -14,12 +14,20 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
+# Hardware tunables forwarded to hardware.launch.py (defaults live there).
+HARDWARE_ARGS = {
+    'wheel_separation': '0.35', 'max_speed': '0.26', 'max_pwm': '30', 'min_pwm': '20',
+    'publish_sensors': 'false', 'use_eyes': 'true',
+}
+
+
 def generate_launch_description():
     omni_share = get_package_share_directory('omni_base')
     slam_params = os.path.join(omni_share, 'config', 'slam_params.yaml')
 
     lidar_port   = LaunchConfiguration('lidar_port')
     arduino_port = LaunchConfiguration('arduino_port')
+    hw_args = {name: LaunchConfiguration(name) for name in HARDWARE_ARGS}
 
     return LaunchDescription([
         DeclareLaunchArgument('lidar_port', default_value='/dev/rplidar',
@@ -27,12 +35,15 @@ def generate_launch_description():
         DeclareLaunchArgument('arduino_port', default_value='/dev/arduino',
                               description='Serial port for the Arduino Mega'),
 
+        *[DeclareLaunchArgument(name, default_value=default) for name, default in HARDWARE_ARGS.items()],
+
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
                 os.path.join(omni_share, 'launch', 'hardware.launch.py')),
             launch_arguments={
                 'lidar_port': lidar_port,
                 'arduino_port': arduino_port,
+                **hw_args,
             }.items()
         ),
 
