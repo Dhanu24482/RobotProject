@@ -245,6 +245,7 @@ function connect() {
 
   ros.on('close', function () {
     connected = false;
+    stopMapWatch();
     setBody('data-connected', 'false');
     setField('conn', 'Offline', 'err');
     setField('rosurl', 'offline', 'err');
@@ -263,7 +264,53 @@ function connect() {
 
 function disconnect() { if (ros) ros.close(); }
 
+// ── The map ──────────────────────────────────────────────────────────────────────────────────────
+// /map is a "latched" topic: the map server publishes it ONCE and keeps it for late joiners. rosbridge only receives that
+// saved copy if it subscribes in the matching way, and it picks the wrong way when something else also publishes /map
+// (for example the Zenoh bridge's own publisher while a remote RViz is connected). Then the page would wait forever.
+// A service has no such trap, so if no map arrives, ask the map server for it directly and keep trying until it answers.
+var MAP_SERVICES = ['/map_server/map', '/slam_toolbox/dynamic_map'];     // navigation, then mapping; both are nav_msgs/GetMap
+var mapTimer = null;
+
+function applyMap(msg) {
+  mapData = msg.data; mapInfo = msg.info;
+  setField('mapstat', 'ok', 'ok');
+  setField('mapsize', msg.info.width + ' x ' + msg.info.height);
+  fitView(); render();
+}
+
+function stopMapWatch() { clearTimeout(mapTimer); mapTimer = null; }
+
+function watchForMap(attempt) {
+  stopMapWatch();
+  mapTimer = setTimeout(function () {
+    if (!connected || mapInfo) return;                       // the topic delivered it, or we went offline
+    fetchMap(0, attempt);
+  }, attempt === 0 ? 2500 : Math.min(15000, 2500 * (attempt + 1)));
+}
+
+function fetchMap(i, attempt) {
+  if (!connected || mapInfo) return;
+  if (i >= MAP_SERVICES.length) { watchForMap(attempt + 1); return; }      // none answered (is navigation still starting?)
+  var done = false;
+  var next = function () { if (!done) { done = true; clearTimeout(timer); fetchMap(i + 1, attempt); } };
+  var timer = setTimeout(next, 6000);
+  new ROSLIB.Service({ ros: ros, name: MAP_SERVICES[i], serviceType: 'nav_msgs/srv/GetMap' })
+    .callService(new ROSLIB.ServiceRequest({}), function (res) {
+      if (done) return;
+      done = true; clearTimeout(timer);
+      var m = res && res.map;
+      if (m && m.info && m.info.width > 0 && !mapInfo) {
+        applyMap(m);
+        log('Map received from ' + MAP_SERVICES[i] + ' (the /map topic had not delivered it).', 'i');
+      } else if (!mapInfo) {
+        fetchMap(i + 1, attempt);
+      }
+    }, next);
+}
+
 function setupTopics() {
+  mapData = null; mapInfo = null;      // a new connection may mean a different map (the system was restarted): start clean
   pubs.cmdVel  = new ROSLIB.Topic({ ros: ros, name: '/cmd_vel',            messageType: 'geometry_msgs/Twist' });
   pubs.goal    = new ROSLIB.Topic({ ros: ros, name: '/goal_pose',          messageType: 'geometry_msgs/PoseStamped' });
   pubs.initial = new ROSLIB.Topic({ ros: ros, name: '/initialpose',        messageType: 'geometry_msgs/PoseWithCovarianceStamped' });
@@ -280,12 +327,8 @@ function setupTopics() {
     .subscribe(function (msg) { showSpeed(msg.data); });
 
   new ROSLIB.Topic({ ros: ros, name: '/map', messageType: 'nav_msgs/OccupancyGrid', throttle_rate: 3000 })
-    .subscribe(function (msg) {
-      mapData = msg.data; mapInfo = msg.info;
-      setField('mapstat', 'ok', 'ok');
-      setField('mapsize', msg.info.width + ' x ' + msg.info.height);
-      fitView(); render();
-    });
+    .subscribe(applyMap);
+  watchForMap(0);                       // ...and if the topic stays silent, ask the map server directly (see below)
 
   new ROSLIB.Topic({ ros: ros, name: '/amcl_pose', messageType: 'geometry_msgs/PoseWithCovarianceStamped', throttle_rate: 400 })
     .subscribe(function (msg) {
@@ -1100,7 +1143,7 @@ function init(opts) {
 
   global.addEventListener('resize', function () { if (mapData) fitView(); render(); });
   render();
-  log('Control panel ready.', 'i');
+  log('Control panel ready (build map2).', 'i');
 
   // A wall tablet should come back on its own after a reboot, so always try —
   // the saved address if there is one, otherwise the best guess. A failure is

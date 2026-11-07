@@ -83,6 +83,20 @@ Other things worth checking:
 - `lib/roslib.min.js` loads (the page needs the `lib/` folder next to
   `lumi-core.js`). The banner says so if `ROSLIB` is missing.
 
+### The map does not show up ("Waiting for /map")
+
+`/map` is a *latched* topic: the map server publishes it **once** and keeps it for late joiners. rosbridge only receives that
+saved copy when it subscribes in the matching way, and it picks the wrong way when something else also publishes `/map`
+(for example the Zenoh bridge's own publisher while a remote RViz is connected). The page used to wait forever then.
+It now asks the map server directly if no map arrives within about 2.5 s (`/map_server/map`, or `/slam_toolbox/dynamic_map`
+while mapping, both `nav_msgs/GetMap`) and keeps retrying while navigation is still starting.
+
+To check from the Pi whether the page gets the map, with the robot running:
+
+```bash
+node scripts/check_map_delivery.js        # prints "MAP RECEIVED: 69 x 78" (or "NO MAP after 15 s")
+```
+
 ### Regression test
 
 `scripts/check_web_layouts.py` runs `lumi-core.js` against a synthetic DOM built

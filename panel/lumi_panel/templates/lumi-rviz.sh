@@ -463,6 +463,41 @@ print_next_steps() {
   echo "   Something wrong?            bash $SELF diag"
 }
 
+# Can this machine look the tunnel hostname up? (A broken resolver makes the sign-in AND the tunnel fail with confusing
+# messages, so say so first. Typical on WSL after a restart: /etc/resolv.conf points at a resolver that is not running.)
+dns_ok() { python3 -c 'import socket, sys; socket.getaddrinfo(sys.argv[1], 443)' "$HOST" >/dev/null 2>&1; }
+
+dns_help() {
+  if ! ip route 2>/dev/null | grep -q '^default'; then
+    warn "this machine has NO network connection (no default route), so $HOST cannot be reached - DNS is just the first thing to fail."
+    if grep -qi microsoft /proc/version 2>/dev/null; then
+      echo "   This is WSL and its network did not come up (common after Windows sleeps, or after the Wi-Fi changes)." >&2
+      echo "   1) In Windows PowerShell run:   wsl --shutdown    then open Ubuntu again, and run this script again." >&2
+      echo "   2) If it keeps happening: in C:\\Users\\<you>\\.wslconfig under [wsl2] change  networkingMode=mirrored  to  networkingMode=nat" >&2
+      echo "      (this setup only needs outgoing internet, so NAT works fine), run  wsl --shutdown  again, and reopen Ubuntu." >&2
+    else
+      echo "   Check this machine's network connection (try:  ip route   and   ping -c1 1.1.1.1 )." >&2
+    fi
+    return 0
+  fi
+  warn "this machine cannot look up $HOST - its DNS (name lookup) is not working, so nothing can connect yet."
+  if [ -e /etc/resolv.conf ]; then
+    echo "   nameserver lines in /etc/resolv.conf: $(grep -E '^nameserver' /etc/resolv.conf 2>/dev/null | awk '{print $2}' | tr '\n' ' ')" >&2
+  else
+    echo "   /etc/resolv.conf is MISSING (or a broken link), so lookups go to a resolver that does not exist: ls -l /etc/resolv.conf" >&2
+  fi
+  if grep -qi microsoft /proc/version 2>/dev/null; then
+    echo "   This is WSL. The usual cause is a resolver that is not running (for example a nameserver of ::1 or 127.0.0.1)." >&2
+    echo "   Fix right now, then run this script again:" >&2
+    echo "       sudo sh -c 'rm -f /etc/resolv.conf; printf \"nameserver 10.255.255.254\\nnameserver 1.1.1.1\\nnameserver 8.8.8.8\\n\" > /etc/resolv.conf'" >&2
+    echo "   (10.255.255.254 is WSL's own link to the Windows DNS, which also works on networks that block outside DNS)" >&2
+    echo "   If that file disappears or gets rewritten later: in Windows PowerShell run  wsl --shutdown  and reopen Ubuntu, or keep your own" >&2
+    echo "   copy with  [network] generateResolvConf=false  in /etc/wsl.conf (then WSL stops regenerating it)." >&2
+  else
+    echo "   Check this machine's network and DNS settings (try:  getent hosts $HOST )." >&2
+  fi
+}
+
 do_start() {
   ISSUES=0
   say "Checking this machine"
@@ -470,6 +505,10 @@ do_start() {
   ok "cloudflared and the Zenoh bridge are installed"
   [ "$HOST" = "zenoh.example.com" ] && die "Pass the tunnel hostname once:  bash $SELF your-hostname.example.com"
   echo "$HOST" > "$BASE/host"
+  if ! bridge_connected; then
+    dns_ok || { dns_help; die "stopped before changing anything. Fix the DNS problem above and run:  bash $SELF"; }
+    ok "DNS: $HOST can be looked up"
+  fi
   sign_in || bad "not signed in - the tunnel will not connect until you finish:  bash $SELF login"
   RESTART_NEEDED=0; write_files
   check_local_ros

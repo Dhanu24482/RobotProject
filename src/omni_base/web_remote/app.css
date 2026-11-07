@@ -94,3 +94,75 @@ kbd { background: var(--card-2); border: 1px solid var(--line-2); border-radius:
 @keyframes in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; } }
+
+/* ── the picture board: a little drawing that comes with an answer, stays a while, fades away ────────── */
+.board {
+  position: relative; width: min(92vw, 420px); padding: 14px 16px 18px; border-radius: 22px; text-align: left;
+  background: linear-gradient(180deg, rgba(21, 31, 51, .92), rgba(10, 16, 27, .92)); border: 1px solid var(--line-2);
+  box-shadow: 0 24px 60px -24px rgba(0, 0, 0, .8), 0 0 0 1px rgba(70, 199, 255, .06);
+  opacity: 1; transform: none; transition: opacity 1.2s ease, transform 1.2s ease;
+  animation: board-in .35s var(--ease);
+}
+.board[hidden] { display: none; }
+.board.fade-out { opacity: 0; transform: translateY(-6px) scale(.985); }
+@keyframes board-in { from { opacity: 0; transform: translateY(10px) scale(.97); } to { opacity: 1; transform: none; } }
+.board-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.board-head h2 { margin: 0; font: 700 .95rem/1.25 var(--font); letter-spacing: .01em; color: var(--text); }
+.board-head h2[hidden] { display: none; }
+.board-x {
+  display: grid; place-items: center; width: 36px; height: 36px; flex: none; margin-left: auto; padding: 0; cursor: pointer;
+  color: var(--muted); background: rgba(255, 255, 255, .04); border: 1px solid var(--line-2); border-radius: 10px;
+  transition: color .15s, border-color .15s, background .15s, transform .12s var(--ease);
+}
+.board-x:hover { color: var(--text); border-color: rgba(70, 199, 255, .42); background: rgba(70, 199, 255, .1); }
+.board-x:active { transform: scale(.92); }
+.board-x:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.board-x svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; pointer-events: none; }
+
+.board-art {
+  width: min(100%, 46vh, 280px); aspect-ratio: 1; margin: 2px auto 0; border-radius: 16px; overflow: hidden;
+  background-color: rgba(3, 7, 14, .55); border: 1px solid var(--line);
+  background-image: radial-gradient(circle, rgba(255, 255, 255, .09) 1px, transparent 1.3px); background-size: 10% 10%;
+}
+.board-art svg { display: block; width: 100%; height: 100%; }
+.board-formula {
+  margin: 12px 0 0; text-align: center; font: 600 1.5rem/1.2 ui-monospace, "JetBrains Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: .02em; color: var(--accent); text-shadow: 0 0 18px rgba(70, 199, 255, .35); overflow-wrap: anywhere;
+}
+.board-formula[hidden], .board-notes[hidden] { display: none; }
+.board-notes { margin: 10px 0 0; padding: 0; list-style: none; display: grid; gap: 5px; }
+.board-notes li { position: relative; padding-left: 15px; font-size: .86rem; line-height: 1.35; color: var(--muted); overflow-wrap: anywhere; }
+.board-notes li::before { content: ""; position: absolute; left: 1px; top: .55em; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); opacity: .8; }
+
+/* the time it has left, as a thin bar under the card */
+.board-time { position: absolute; left: 16px; right: 16px; bottom: 7px; height: 3px; border-radius: 3px; background: rgba(255, 255, 255, .06); overflow: hidden; }
+.board-time i { display: block; height: 100%; width: 100%; background: var(--accent); transform-origin: left; transform: scaleX(1); opacity: .8; }
+.board-time i.run { animation: board-shrink var(--dur, 20s) linear forwards; }
+.board.held .board-time i { animation-play-state: paused; }
+@keyframes board-shrink { to { transform: scaleX(0); } }
+
+/* shapes (colour comes from --c; every shape draws itself in, one after the other) */
+.sh { fill: none; stroke: var(--c, #dbe6f7); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.c-accent { --c: var(--accent); } .c-green { --c: var(--ok); } .c-yellow { --c: var(--warn); } .c-red { --c: var(--danger); } .c-white { --c: #f4f8ff; }
+.sh.fill { fill: var(--c, #dbe6f7); fill-opacity: .13; }
+.sh.dot, .sh.head { fill: var(--c, #dbe6f7); stroke: none; }
+.sh.dash { stroke-dasharray: 2.6 2; }
+.sh.t { fill: var(--c, #f4f8ff); stroke: none; font: 700 5.4px var(--font); }
+.sh.t.small { font-size: 3.8px; } .sh.t.large { font-size: 8px; }
+.sh.draw { stroke-dasharray: 1; stroke-dashoffset: 1; animation: board-draw .8s var(--ease) forwards; animation-delay: calc(var(--i, 0) * 170ms); }
+.sh.fill.draw { fill-opacity: 0; animation: board-draw .8s var(--ease) forwards, board-fill .6s ease forwards; animation-delay: calc(var(--i, 0) * 170ms), calc(var(--i, 0) * 170ms + 500ms); }
+.sh.fade { opacity: 0; animation: board-pop .5s ease forwards; animation-delay: calc(var(--i, 0) * 170ms + 250ms); }
+@keyframes board-draw { to { stroke-dashoffset: 0; } }
+@keyframes board-fill { to { fill-opacity: .13; } }
+@keyframes board-pop { to { opacity: 1; } }
+
+/* make room: the talk button shrinks while a picture is up, so it is still easy to ask the next question */
+#talk { transition: transform .1s var(--ease), background .2s, box-shadow .2s, color .2s, width .4s var(--ease); }
+body.has-board #talk { width: min(30vw, 22vh, 128px); gap: 4px; font-size: .8rem; }
+body.has-board .hint { display: none; }
+body.has-board main { padding-top: 0; gap: 14px; justify-content: flex-start; }
+@media (prefers-reduced-motion: reduce) {
+  .board, .board.fade-out { transition: none; animation: none; }
+  .sh.draw, .sh.fade, .sh.fill.draw { animation-delay: 0s !important; }
+  .board-time i.run { animation: none; transform: scaleX(.5); }
+}

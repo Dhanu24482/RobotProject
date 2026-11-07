@@ -234,6 +234,11 @@ def _read_bashrc_exports():
     return found
 
 
+# The Gemini models the robot tries, in order (override with GEMINI_MODELS="a,b" in Settings > Environment variables).
+# Keep in step with AIClient.DEFAULT_MODELS in omni_base/voice_node.py.
+GEMINI_DEFAULT_MODELS = ('gemini-2.5-flash', 'gemini-3-flash-preview', 'gemini-3.1-flash-lite-preview')
+
+
 class EnvStore:
     def __init__(self):
         self._lock = threading.RLock()
@@ -307,6 +312,12 @@ class EnvStore:
             self._save()
 
     # -- gemini keys ------------------------------------------------------
+    def gemini_models(self):
+        with self._lock:
+            raw = self._vars.get('GEMINI_MODELS', '')
+        models = [m.strip() for m in raw.split(',') if re.fullmatch(r'[A-Za-z0-9._-]{3,80}', m.strip())]
+        return list(dict.fromkeys(models)) or list(GEMINI_DEFAULT_MODELS)
+
     def gemini_keys(self):
         with self._lock:
             raw = self._vars.get('GEMINI_API_KEYS', '') or self._vars.get('GEMINI_API_KEY', '')

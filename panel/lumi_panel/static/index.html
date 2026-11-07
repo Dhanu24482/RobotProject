@@ -87,7 +87,13 @@
     <section id="tab-settings" class="tab" hidden>
       <div class="card">
         <h2>Gemini API keys</h2>
-        <p class="muted">Keys are write-only: they are stored on the robot and never shown in full. Voice rotates through them when one is rate-limited. Restart voice to apply.</p>
+        <p class="muted">Keys are write-only: they are stored on the robot and never shown in full. Voice skips a key that is out of quota or rejected, tries it again later, and falls back to the next model when every key is spent on the first. Restart voice to apply new keys.</p>
+        <div class="row actions keybar">
+          <button id="gemini-check-all" class="primary" type="button">Check all keys</button>
+          <label class="check keyopt"><input id="gemini-check-fallback" type="checkbox"> Also test the fallback model</label>
+          <span id="gemini-summary" class="muted"></span>
+        </div>
+        <p id="gemini-models" class="muted keynote"></p>
         <div id="gemini-list"></div>
         <form id="gemini-form" class="row"><input id="gemini-key" type="password" placeholder="Paste a new API key" autocomplete="off" spellcheck="false" required><button class="primary" type="submit">Add key</button></form>
         <p id="gemini-msg" class="note" hidden></p>

@@ -12,6 +12,7 @@ from geometry_msgs.msg import Twist
 from geometry_msgs.msg import PoseStamped
 from action_msgs.msg import GoalStatusArray
 import speech_recognition as sr
+from omni_base import canvas_spec
 from omni_base.motion_stop import Halter
 import subprocess
 import threading
@@ -126,25 +127,76 @@ class TTSEngine:
 #  AI CLIENT
 # ════════════════════════════════════════════════════════════
 class AIClient:
+    """Gemini Q&A with automatic key AND model fallback.
+
+    Free-tier quotas are counted per Google project per MODEL, so when every key is spent on the first model the same
+    keys usually still work on the next one. Pairs are tried in this order: all keys on model 1, then all keys on
+    model 2, ... and the best usable pair is always preferred again as soon as it is available (a daily quota resets).
+    """
     SYSTEM_INSTRUCTION = (
-        "You are Lumi, an advanced humanoid reception robot. "
-        "Keep answers SHORT — maximum 2 sentences. "
-        "Never say you are an AI. You ARE Lumi the robot."
+        "You are Lumi, an advanced humanoid reception robot. Never say you are an AI. You ARE Lumi the robot.\n"
+        "Always reply with ONE JSON object and nothing else: {\"say\": \"...\", \"canvas\": null}\n"
+        "- say: what you speak aloud. MAX 2 SHORT sentences in plain words (it is read out loud: no markdown, no emoji).\n"
+        "- canvas: null for almost every answer. Add a small picture ONLY when seeing it clearly helps the person: "
+        "maths and geometry, formulas, shapes, simple diagrams or how-something-works sketches. Chit-chat, facts, "
+        "directions, yes/no, opinions and anything short stay voice-only: canvas null.\n"
+        "Canvas format: {\"title\": \"short title\", \"seconds\": 25, \"shapes\": [...], \"formula\": \"C = 2\u03c0r\", "
+        "\"notes\": [\"short line\"]}\n"
+        "- seconds: how long the picture stays on screen before it fades (8 to 90). Choose by how much there is to take in: "
+        "one formula 10-15, a diagram with a couple of notes 25-40, several steps 45-90.\n"
+        "- The drawing area is 100 wide by 100 high; (0,0) is the top-left; every number is 0-100 (degrees for arcs).\n"
+        "- shapes (at most 14), each {\"kind\": ...}: circle {x,y,r}; line {x,y,x2,y2}; arrow {x,y,x2,y2}; rect {x,y,w,h}; "
+        "arc {x,y,r,start,end} (degrees, 0 = right, clockwise); dot {x,y}; poly {points:[x1,y1,x2,y2,...]} (closed, max 8 "
+        "points); text {x,y,text,size:\"small\"|\"normal\"|\"large\"} (text max 12 characters; Greek and maths symbols are fine: "
+        "\u03c0 \u03b8 \u03b1 \u03b2 \u0394 \u221a \u00b2 \u00b3 \u2248 \u00d7 \u00f7 \u00b0 \u2220). Optional on any shape: "
+        "\"color\": \"accent\"|\"green\"|\"yellow\"|\"red\"|\"white\", \"dashed\": true, \"fill\": true (circle, rect, poly).\n"
+        "- formula: one short line (max 40 characters) shown big under the picture. notes: at most 3 short lines (max 60 "
+        "characters each).\n"
+        "- Keep it simple and uncluttered. Label the important parts with short text shapes placed BESIDE the lines, not on them.\n"
+        "Example. User: How do I calculate the circumference of a circle?\n"
+        "{\"say\": \"Multiply the radius by two and then by pi.\", \"canvas\": {\"title\": \"Circumference of a circle\", "
+        "\"seconds\": 30, \"shapes\": [{\"kind\": \"circle\", \"x\": 50, \"y\": 52, \"r\": 34, \"color\": \"accent\", \"fill\": true}, "
+        "{\"kind\": \"arc\", \"x\": 50, \"y\": 52, \"r\": 34, \"start\": 200, \"end\": 340, \"color\": \"green\"}, "
+        "{\"kind\": \"dot\", \"x\": 50, \"y\": 52}, {\"kind\": \"arrow\", \"x\": 50, \"y\": 52, \"x2\": 84, \"y2\": 52, "
+        "\"color\": \"yellow\"}, {\"kind\": \"text\", \"x\": 68, \"y\": 45, \"text\": \"r\", \"size\": \"large\", "
+        "\"color\": \"yellow\"}, {\"kind\": \"text\", \"x\": 50, \"y\": 9, \"text\": \"C\", \"size\": \"large\", "
+        "\"color\": \"green\"}], \"formula\": \"C = 2\u03c0r\", \"notes\": [\"r is the radius\", \"\u03c0 \u2248 3.14159\", "
+        "\"r = 5 gives C \u2248 31.4\"]}}\n"
+        "Example. User: What are your opening hours?\n"
+        "{\"say\": \"I do not have that information, but the reception desk can help you.\", \"canvas\": null}"
     )
-    # How long to skip a key after it hits a rate/quota limit.
-    KEY_COOLDOWN_SEC = 60.0
+    # In priority order; override with GEMINI_MODELS="a,b,c" (panel: Settings > Environment variables).
+    # Keep in step with config.GEMINI_DEFAULT_MODELS in the control panel.
+    DEFAULT_MODELS = ('gemini-2.5-flash', 'gemini-3-flash-preview', 'gemini-3.1-flash-lite-preview')
+
+    # How long to skip a (key, model) pair after something goes wrong (see _classify):
+    KEY_COOLDOWN_SEC = 60.0          # rate-limited and Google gave no delay: first time; doubles per consecutive failure
+    KEY_COOLDOWN_MAX = 3600.0        #   ...and a daily quota waits this long between looks (it resets by itself)
+    KEY_REJECTED_SEC = 6 * 3600.0    # Google rejects the key (invalid / forbidden): leave it alone for hours, on every model
+    MODEL_GONE_SEC = 6 * 3600.0      # the model does not exist / is not offered to us: skip it for every key
+    BUSY_COOLDOWN_SEC = 15.0         # Google's MODEL is overloaded (the key is fine): back off briefly
+    DAILY_PROBES = 3                 # keys from one Google project share a daily quota, so after this many "daily quota used
+    MODEL_RECHECK_SEC = 300.0        #   up" answers in a row the model is paused this long (each probe costs ~1 s) and the
+                                     #   next model answers at once; the probing then continues with the NEXT keys
+    REQUEST_TIMEOUT_SEC = 40.0       # give up on one request after this long and treat it as "busy"
+    MAX_OUTPUT_TOKENS = 1600         # room for a spoken sentence plus a small picture, never an essay
+    BUSY_TRIES = 2                   #   ...and give up politely after this many, instead of cycling through everything
 
     def __init__(self, logger):
-        self.logger    = logger
-        self.keys      = self._load_keys()
-        self.cooldowns = {}          # key -> epoch time it becomes usable again
-        self.idx       = 0
-        self.client    = None
-        self.chat      = None
-        self.active_key = None
-        self.ready     = False
+        self.logger      = logger
+        self.keys        = self._load_keys()
+        self.models      = self._load_models()
+        self.cooldowns   = {}        # (key, model) -> epoch time it becomes usable again
+        self.fail_streak = {}        # (key, model) -> consecutive rate-limit failures (drives the growing cooldown)
+        self.model_gone  = {}        # model -> epoch time we look at it again
+        self.idx         = {m: 0 for m in self.models}      # per model: where the round-robin over keys continues
+        self.client      = None
+        self.chat        = None
+        self.active_key  = None
+        self.active_model = None
+        self.ready       = False
         if self.keys:
-            self._activate_next_key()
+            self._activate()
         else:
             self.logger.warn('No Gemini API key found (GEMINI_API_KEYS / GEMINI_API_KEY).')
 
@@ -153,58 +205,179 @@ class AIClient:
         raw = os.environ.get('GEMINI_API_KEYS', '') or os.environ.get('GEMINI_API_KEY', '')
         return [k.strip() for k in raw.split(',') if k.strip()]
 
-    def _activate_next_key(self):
-        # Find the next key that is not in cooldown and build a fresh client/chat.
+    def _load_models(self):
+        raw = os.environ.get('GEMINI_MODELS', '')
+        models = [m.strip() for m in raw.split(',') if m.strip()] or list(self.DEFAULT_MODELS)
+        return list(dict.fromkeys(models))               # keep the order, drop duplicates
+
+    def _usable(self, key, model, now):
+        return self.cooldowns.get((key, model), 0) <= now and self.model_gone.get(model, 0) <= now
+
+    def _activate(self):
+        """Switch to the best usable (key, model) pair and build a fresh chat for it. False if there is none."""
         now = time.time()
-        for _ in range(len(self.keys)):
-            key = self.keys[self.idx]
-            self.idx = (self.idx + 1) % len(self.keys)
-            if self.cooldowns.get(key, 0) > now:
+        n = len(self.keys)
+        for model in self.models:
+            if self.model_gone.get(model, 0) > now:
                 continue
-            if self._build_client(key):
-                self.active_key = key
-                self.ready = True
-                return True
+            start = self.idx[model]
+            for step in range(n):
+                key = self.keys[(start + step) % n]
+                if self.cooldowns.get((key, model), 0) > now:
+                    continue
+                if self._build_client(key, model):
+                    self.idx[model] = (start + step + 1) % n
+                    self.active_key, self.active_model, self.ready = key, model, True
+                    return True
         self.ready = False
         return False
 
-    def _build_client(self, key):
+    def _prefer_best(self):
+        """Go back to a higher-priority model as soon as one of its keys is usable again (a daily quota resets)."""
+        now = time.time()
+        for model in self.models:
+            if model == self.active_model:
+                return                                   # nothing better than what we are on
+            if self.model_gone.get(model, 0) > now:
+                continue
+            if any(self.cooldowns.get((k, model), 0) <= now for k in self.keys):
+                self._activate()
+                return
+
+    def _build_client(self, key, model):
         try:
             from google import genai
             from google.genai import types
-            self.client = genai.Client(api_key=key)
-            config = types.GenerateContentConfig(system_instruction=self.SYSTEM_INSTRUCTION)
-            self.chat = self.client.chats.create(model='gemini-2.5-flash', config=config)
+            # A hard time limit: a stuck request must never freeze the robot's voice (it is classified as "busy").
+            self.client = genai.Client(api_key=key, http_options=types.HttpOptions(timeout=int(self.REQUEST_TIMEOUT_SEC * 1000)))
+            kw = {'system_instruction': self.SYSTEM_INSTRUCTION, 'response_mime_type': 'application/json',
+                  'max_output_tokens': self.MAX_OUTPUT_TOKENS}
+            # A spoken answer must not wait for the model to ponder: thinking is what made picture answers take 20+ s.
+            if model.startswith('gemini-3'):
+                kw['thinking_config'] = types.ThinkingConfig(thinking_level='low')
+            else:
+                kw['thinking_config'] = types.ThinkingConfig(thinking_budget=0)
+            self.chat = self.client.chats.create(model=model, config=types.GenerateContentConfig(**kw))
             return True
         except Exception as e:
-            self.logger.error(f'AI setup failed for a key: {e}')
+            self.logger.error(f'AI setup failed for {model}: {e}')
             return False
 
     @staticmethod
-    def _is_rate_limit(err):
+    def _classify(err):
+        """What went wrong, in terms of what to do about it:
+        'rate'     this key is out of quota / rate-limited on this model -> skip the pair for a while
+        'rejected' Google refuses this key (invalid/forbidden)           -> skip the key for hours, on every model
+        'gone'     this model is not available (404 / retired)           -> skip the model for hours, for every key
+        'busy'     Google's model is overloaded / unreachable            -> brief back-off (another key will not help much)
+        'other'    anything else                                         -> a real error in the question, do not rotate
+        Status codes are matched as whole numbers: a retry delay such as 85401s must not read as an HTTP 401.
+        """
         s = str(err).lower()
-        return ('429' in s or 'resource_exhausted' in s or 'resourceexhausted' in s
-                or 'quota' in s or 'rate limit' in s or 'rate_limit' in s)
+        if re.search(r'\b40[13]\b', s) or any(w in s for w in ('api key not valid', 'api_key_invalid', 'permission_denied',
+                                                               'unauthenticated', 'api key expired')):
+            return 'rejected'
+        if re.search(r'\b429\b', s) or any(w in s for w in ('resource_exhausted', 'resourceexhausted', 'quota', 'rate limit',
+                                                            'rate_limit')):
+            return 'rate'
+        if re.search(r'\b404\b', s) or any(w in s for w in ('not_found', 'no longer available', 'is not found')):
+            return 'gone'
+        if re.search(r'\b50[0234]\b', s) or any(w in s for w in ('unavailable', 'overloaded', 'high demand', 'internal',
+                                                                 'deadline', 'timed out', 'timeout', 'connection', 'network')):
+            return 'busy'
+        return 'other'
 
-    def ask(self, question):
-        if not self.ready or not self.keys:
-            return "My AI module is unavailable right now."
-        # Try each available key once; rotate past any that are rate-limited.
-        attempts = max(1, len(self.keys))
-        for _ in range(attempts):
+    @staticmethod
+    def _is_daily(err):
+        return 'perday' in str(err).lower().replace('_', '')
+
+    def _rate_cooldown(self, err, streak):
+        """How long to leave a rate-limited pair alone. Google says: a per-minute limit comes with a retry delay (use it),
+        a daily one means "wait" (an hour between looks is plenty, it resets by itself). Otherwise back off 1, 2, 4... min."""
+        s = str(err).lower().replace('_', '')
+        if self._is_daily(err):
+            return self.KEY_COOLDOWN_MAX
+        m = re.search(r'retrydelay\W+(\d+(?:\.\d+)?)s', s)
+        if m:
+            return min(max(float(m.group(1)) + 2.0, 5.0), 300.0)
+        return min(self.KEY_COOLDOWN_MAX, self.KEY_COOLDOWN_SEC * (2 ** (streak - 1)))
+
+    def _label(self, key, model=None):
+        """A name for a key that is safe to log: its position in the list (and the model), never the key itself."""
+        n = f'#{self.keys.index(key) + 1}' if key in self.keys else '?'
+        return f'{n}/{model}' if model else n
+
+    def _ask_raw(self, question):
+        """Returns (text, answered): the model's raw reply, or a ready-made apology with answered=False."""
+        if not self.keys:
+            return "My AI module is unavailable right now.", False
+        if self.ready:
+            self._prefer_best()
+        elif not self._activate():                       # everything was cooling down: look again, a cooldown may be over
+            return "All my AI keys are busy right now. Please try again shortly.", False
+        busy_msg = "My AI service is busy right now. Please try again in a moment."
+        busy_seen = {}                                   # model -> how many "overloaded" answers it gave this question
+        daily_seen = {}                                  # model -> how many "daily quota used up" answers this question
+        # At most one try per (key, model) pair; rotate past any that cannot answer right now.
+        for _ in range(max(1, len(self.keys) * len(self.models))):
+            key, model = self.active_key, self.active_model
             try:
                 response = self.chat.send_message(question)
-                return response.text.strip().replace('*', '').replace('#', '').replace('`', '')
+                self.fail_streak[(key, model)] = 0
+                return response.text or '', True
             except Exception as e:
-                if self._is_rate_limit(e):
-                    self.logger.warn('Gemini key rate-limited — rotating to next key.')
-                    self.cooldowns[self.active_key] = time.time() + self.KEY_COOLDOWN_SEC
-                    if not self._activate_next_key():
-                        return "All my AI keys are busy right now. Please try again shortly."
-                    continue
-                self.logger.error(f'AI error: {e}')
-                return "I am sorry, I could not process that question."
-        return "All my AI keys are busy right now. Please try again shortly."
+                kind = self._classify(e)
+                if kind == 'other':
+                    self.logger.error(f'AI error: {e}')
+                    return "I am sorry, I could not process that question.", False
+                now = time.time()
+                if kind == 'rate':
+                    n = self.fail_streak.get((key, model), 0) + 1
+                    self.fail_streak[(key, model)] = n
+                    cooldown = self._rate_cooldown(e, n)
+                    self.cooldowns[(key, model)] = now + cooldown
+                    self.logger.warn(f'Gemini {self._label(key, model)} is rate-limited - skipping it for {cooldown:.0f}s.')
+                    if self._is_daily(e):
+                        daily_seen[model] = daily_seen.get(model, 0) + 1
+                        if daily_seen[model] >= self.DAILY_PROBES and len(self.models) > 1:
+                            self.model_gone[model] = now + self.MODEL_RECHECK_SEC
+                            self.logger.warn(f'Gemini {model}: daily quota is used up on {daily_seen[model]} keys in a row - '
+                                             f'using the next model, and looking at it again in {self.MODEL_RECHECK_SEC:.0f}s.')
+                elif kind == 'rejected':
+                    for m in self.models:
+                        self.cooldowns[(key, m)] = now + self.KEY_REJECTED_SEC
+                    self.logger.warn(f'Gemini key {self._label(key)} was rejected by Google - skipping it for hours. '
+                                     f'Check it in the control panel (Settings > Gemini API keys).')
+                elif kind == 'gone':
+                    self.model_gone[model] = now + self.MODEL_GONE_SEC
+                    self.logger.warn(f'Gemini model {model} is not available - using the next model instead.')
+                else:
+                    busy_seen[model] = busy_seen.get(model, 0) + 1
+                    self.cooldowns[(key, model)] = now + self.BUSY_COOLDOWN_SEC
+                    if busy_seen[model] >= self.BUSY_TRIES:
+                        # The MODEL is overloaded (the keys are fine): stop asking it, go on to the next model.
+                        for k in self.keys:
+                            self.cooldowns[(k, model)] = max(self.cooldowns.get((k, model), 0), now + self.BUSY_COOLDOWN_SEC)
+                    self.logger.warn(f'Gemini is busy ({self._label(key, model)}): {str(e)[:120]}')
+                if not self._activate():
+                    if kind == 'rejected':
+                        return "None of my AI keys are working right now. Please check them in the control panel.", False
+                    if kind == 'busy':
+                        return busy_msg, False
+                    return "All my AI keys are busy right now. Please try again shortly.", False
+        return busy_msg, False
+
+    def ask_rich(self, question):
+        """(what to say aloud, picture spec or None). The picture is already sanitised (see canvas_spec)."""
+        text, answered = self._ask_raw(question)
+        if not answered:
+            return text, None
+        say, canvas = canvas_spec.parse_ai_json(text)
+        say = say.replace('*', '').replace('#', '').replace('`', '').strip()
+        return (say or "I am not sure how to answer that."), canvas
+
+    def ask(self, question):
+        return self.ask_rich(question)[0]
 
 # ════════════════════════════════════════════════════════════
 #  VOICE NODE
@@ -248,6 +421,8 @@ class VoiceNode(Node):
         # remote_node) arrive here as JSON; the robot's spoken replies are mirrored out.
         remote_topic       = self.declare_parameter('remote_topic', '/robot/voice/remote_action').value
         reply_topic        = self.declare_parameter('reply_topic',  '/robot/voice/reply').value
+        # A small picture to show on the voice page next to a spoken answer (JSON, see canvas_spec). Only sent when useful.
+        canvas_topic       = self.declare_parameter('canvas_topic', '/robot/voice/canvas').value
         self.enable_mic    = self.declare_parameter('enable_mic', True).value
 
         # Room coordinates: start from canonical static rooms (config/rooms.yaml),
@@ -280,6 +455,7 @@ class VoiceNode(Node):
         self.hands_pub   = self.create_publisher(Float32MultiArray, hands_topic,   10)
         self.emotion_pub = self.create_publisher(String,            emotion_topic, 10)
         self.reply_pub   = self.create_publisher(String,            reply_topic,   10)
+        self.canvas_pub  = self.create_publisher(String,            canvas_topic,  10)
         # Stops motors, timed drive pulses AND any active Nav2 goal (see motion_stop.py).
         self.halter      = Halter(self, body_topic=body_topic)
         self.create_subscription(String, remote_topic, self._on_remote_action, 10)
@@ -583,15 +759,23 @@ class VoiceNode(Node):
     def handle_ai_question(self, text):
         self.set_emotion('surprised')
         def ask_and_speak():
-            answer = self.ai.ask(text)
+            answer, canvas = self.ai.ask_rich(text)
             # Detect AI-unavailable / error responses by checking common phrases
             _error_phrases = ('unavailable', 'busy right now', 'could not process')
             if any(p in answer.lower() for p in _error_phrases):
                 self.set_emotion('sad')
             else:
                 self.set_emotion('happy')
+            if canvas:
+                self.publish_canvas(canvas)          # first, so the picture is already there while the answer is spoken
             self.speak(answer)
         threading.Thread(target=ask_and_speak, daemon=True).start()
+
+    def publish_canvas(self, spec):
+        try:
+            msg = String(); msg.data = json.dumps(spec, ensure_ascii=False); self.canvas_pub.publish(msg)
+        except Exception as e:
+            self.get_logger().warn(f'Could not publish the picture: {e}')
 
     def body_cmd(self, cmd):
         msg = String(); msg.data = cmd; self.body_pub.publish(msg)

@@ -247,6 +247,32 @@
     } catch (e) { note('pose-msg', e.message, 'err'); }
   });
 
+  // ── Gemini key status (the panel remembers the last check of each key until it restarts) ──
+  const KEYSTATE = { ok: 'Working', fallback: 'Fallback only', limited: 'Rate-limited', gone: 'Not offered', quota: 'Out of quota', busy: 'Google busy', invalid: 'Invalid', error: 'No answer' };
+  const KEYSUM = { ok: 'working', fallback: 'fallback only', limited: 'rate-limited (valid)', gone: 'model not offered', quota: 'out of quota', busy: 'Google busy', invalid: 'invalid', error: 'no answer' };
+  function ago(t) {
+    const s = Math.max(0, Math.round(Date.now() / 1000 - t));
+    return s < 60 ? 'just now' : s < 3600 ? Math.round(s / 60) + ' min ago' : Math.round(s / 3600) + ' h ago';
+  }
+  function keyBadge(st) {
+    return h('span', { class: 'keystate ' + (st ? st.state : 'unknown'),
+      title: st ? st.detail + ' (checked ' + ago(st.checked) + ')' : 'Not checked yet - press Check all keys' },
+      st ? (KEYSTATE[st.state] || st.state) : 'Not checked');
+  }
+  const MODELWORD = { ok: 'working', limited: 'rate-limited', quota: 'out of quota', busy: 'busy', gone: 'not offered', invalid: 'invalid', error: 'no answer' };
+  function keyModels(st, models) {
+    const by = {};
+    if (st && st.models) st.models.forEach(m => { by[m.model] = m.state; });
+    return h('small', { class: 'keymodels' }, (models || []).map(m =>
+      m.replace(/^gemini-/, '') + ': ' + (by[m] ? (MODELWORD[by[m]] || by[m]) : 'not tested')).join('   \u00b7   '));
+  }
+  function keySummary(keys) {
+    const c = {}; let newest = 0;
+    keys.forEach(k => { if (k.status) { c[k.status.state] = (c[k.status.state] || 0) + 1; newest = Math.max(newest, k.status.checked); } });
+    const parts = Object.keys(KEYSUM).filter(x => c[x]).map(x => c[x] + ' ' + KEYSUM[x]);
+    return parts.length ? parts.join(' \u00b7 ') + '  (checked ' + ago(newest) + ')' : '';
+  }
+
   // ── settings ──
   async function loadEnv() {
     if (!S) await refresh();
@@ -255,13 +281,18 @@
     const gl = $('gemini-list'); gl.textContent = '';
     if (!d.gemini.length) gl.append(h('p', { class: 'muted' }, 'No keys yet - voice answers will be unavailable.'));
     d.gemini.forEach((k, i) => gl.append(h('div', { class: 'item' },
-      h('span', { class: 'grow' }, '#' + (i + 1) + '  ' + k.masked),
+      h('span', { class: 'grow' }, '#' + (i + 1) + '  ' + k.masked, keyModels(k.status, d.gemini_models)),
+      keyBadge(k.status),
       h('button', { class: 'small', onclick: async ev => {
         ev.target.disabled = true; ev.target.textContent = '…';
-        try { const r = await api('/api/gemini/test', { id: k.id }); toast(r.detail, !r.ok); } catch (e) { toast(e.message, true); }
+        try { const r = await api('/api/gemini/test', { id: k.id }); toast(r.detail, !r.ok); await loadEnv(); } catch (e) { toast(e.message, true); }
         ev.target.disabled = false; ev.target.textContent = 'Test';
       } }, 'Test'),
       h('button', { class: 'small danger', onclick: () => { if (confirm('Remove this key?')) act(async () => { await api('/api/gemini/remove', { id: k.id }); loadEnv(); }, 'Key removed'); } }, 'Remove'))));
+    $('gemini-summary').textContent = keySummary(d.gemini);
+    const ms = d.gemini_models || [];
+    $('gemini-models').textContent = 'The robot tries these models in order: ' + ms.join(', then ') + '. A check uses one request per working key ' +
+      'from the free daily quota of the first model (about 20 a day per Google project); testing the fallback spends its quota too, so it is off by default.';
     if (S && S.env_imported && S.env_imported.length) note('gemini-msg', 'On first run these were imported from ~/.bashrc: ' + S.env_imported.join(', '));
     $('env-prefixes').textContent = d.prefixes.join(' ');
     const el = $('env-list'); el.textContent = '';
@@ -271,6 +302,14 @@
       h('button', { class: 'small danger', onclick: () => { if (confirm('Remove ' + v.name + '?')) act(async () => { await api('/api/env/delete', { name: v.name }); loadEnv(); }, 'Removed'); } }, 'Remove')));
     renderLaunch(); renderBehaviour(true);
   }
+  $('gemini-check-all').addEventListener('click', async ev => {
+    const btn = ev.currentTarget, label = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Checking\u2026';
+    $('gemini-summary').textContent = 'Asking Google about each key\u2026';
+    try { await api('/api/gemini/test_all', { fallback: $('gemini-check-fallback').checked }); await loadEnv(); }
+    catch (e) { toast(e.message, true); $('gemini-summary').textContent = ''; }
+    btn.disabled = false; btn.textContent = label;
+  });
   $('gemini-form').addEventListener('submit', async ev => {
     ev.preventDefault();
     try { await api('/api/gemini/add', { key: $('gemini-key').value }); $('gemini-key').value = ''; note('gemini-msg', 'Key added. Restart voice to use it.', 'ok'); loadEnv(); refresh(); }

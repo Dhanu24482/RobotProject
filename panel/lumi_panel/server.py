@@ -115,6 +115,89 @@ def pi_health():
     return out
 
 
+def gemini_check(key, model):
+    """One tiny REAL generation call on one model.
+
+    Listing models is not a test: it succeeds for a key whose quota is spent. Quotas are per Google project AND per model,
+    so a key can be spent on one model and fine on the next. States: ok | limited | quota | busy | gone | invalid | error.
+    """
+    url = f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent'
+    think = {'thinkingLevel': 'low'} if model.startswith('gemini-3') else {'thinkingBudget': 0}
+    body = json.dumps({'contents': [{'parts': [{'text': 'Reply with the single word OK.'}]}],
+                       'generationConfig': {'maxOutputTokens': 8, 'thinkingConfig': think}}).encode()
+    req = urllib.request.Request(url, data=body, headers={'x-goog-api-key': key, 'Content-Type': 'application/json'})
+    now = int(time.time())
+
+    def out(state, detail, status=None):
+        return {'state': state, 'ok': state == 'ok', 'status': status, 'detail': detail, 'checked': now, 'model': model}
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return out('ok', 'Working.', r.status)
+    except urllib.error.HTTPError as e:
+        if e.code == 429:
+            # A 429 proves the key is VALID (a bad key gets 400). Google says which limit it hit: the per-minute one clears
+            # in seconds (and is shared by every key from the same Google project), a daily one lasts until it resets.
+            try:
+                err = json.loads(e.read().decode() or '{}').get('error', {})
+            except Exception:
+                err = {}
+            ids, retry = '', None
+            for d in err.get('details', []):
+                for v in d.get('violations', []) or []:
+                    ids += ' ' + str(v.get('quotaId', ''))
+                m = re.match(r'^(\d+(?:\.\d+)?)s$', str(d.get('retryDelay', '')))
+                if m:
+                    retry = int(float(m.group(1))) + 1
+            if 'perday' in ids.lower().replace('_', ''):
+                return out('quota', "Today's free quota is used up. It resets by itself (around midnight Pacific time).", 429)
+            wait = f' Try again in about {retry} s.' if retry else ''
+            return out('limited', 'Valid key, but Google is limiting it for a moment (per-minute limit, shared by keys from '
+                                  'the same Google project).' + wait, 429)
+        if e.code in (500, 502, 503, 504):
+            return out('busy', "Google's model is busy right now. The key itself looks fine.", e.code)
+        if e.code == 404:
+            return out('gone', 'This model is not available to this key (retired, or not offered to new users).', 404)
+        if e.code in (400, 401, 403):
+            return out('invalid', 'Rejected by Google: invalid key, or the API is not enabled for it.', e.code)
+        return out('error', f'Unexpected answer (HTTP {e.code}).', e.code)
+    except Exception as e:
+        return out('error', f'Could not reach Google ({type(e).__name__}).')
+
+
+def gemini_check_key(key, models, with_fallback):
+    """Check one key and fold the per-model answers into a single status.
+
+    Only the FIRST model is asked unless `with_fallback`: asking a spent key costs nothing (a 429 is not counted), but a
+    working key spends one request of that model's free quota, so the fallback's quota is not burnt by default.
+    States: ok (first model works) | fallback (first does not, a later one does) | limited | quota | busy | gone | invalid | error.
+    """
+    tried = []
+    for i, m in enumerate(models):
+        if i > 0 and not with_fallback:
+            break
+        r = gemini_check(key, m)
+        tried.append(r)
+        if r['state'] in ('ok', 'invalid'):
+            break                                   # a working model is enough; an invalid key is invalid everywhere
+    first = tried[0]
+    working = next((r for r in tried if r['state'] == 'ok'), None)
+    rows = [{'model': r['model'], 'state': r['state'], 'detail': r['detail']} for r in tried]
+    if working and working is first:
+        state, detail = 'ok', f"Working on {first['model']}."
+    elif working:
+        state = 'fallback'
+        detail = f"{first['model']}: {first['detail']} Works on {working['model']}, which the robot uses instead."
+    elif any(r['state'] == 'invalid' for r in tried):
+        bad = next(r for r in tried if r['state'] == 'invalid')
+        state, detail = 'invalid', bad['detail']
+    else:
+        state, detail = first['state'], f"{first['model']}: {first['detail']}"
+        if with_fallback and len(tried) > 1:
+            detail += ' Fallback: ' + '; '.join(f"{r['model']}: {r['detail']}" for r in tried[1:])
+    return {'state': state, 'ok': state in ('ok', 'fallback'), 'status': first['status'], 'detail': detail,
+            'checked': first['checked'], 'models': rows}
+
+
 class Context:
     def __init__(self):
         config.ensure_dirs()
@@ -122,6 +205,8 @@ class Context:
         self.env = config.EnvStore()
         self.sup = supervisor.Supervisor(self.settings, self.env)
         self.busy = threading.Lock()          # serialises slow one-shot actions (save map, install, ...)
+        self.key_status = {}                  # key id -> last gemini_check() result (in memory; shown next to each key)
+        self.key_check_lock = threading.Lock()
 
 
 def make_handler(ctx):
@@ -398,7 +483,9 @@ def make_handler(ctx):
                 prev = (q.get('previous') or ['0'])[0] == '1'
                 return self._json(200, {'name': name, 'text': ctx.sup.tail(name, lines, prev)})
             if path == '/api/env':
-                return self._json(200, {'vars': ctx.env.listing(), 'gemini': ctx.env.gemini_listing(),
+                return self._json(200, {'vars': ctx.env.listing(),
+                                        'gemini': [dict(k, status=ctx.key_status.get(k['id'])) for k in ctx.env.gemini_listing()],
+                                        'gemini_models': ctx.env.gemini_models(),
                                         'prefixes': list(config.ENV_PREFIXES)})
             if path == '/api/rviz':
                 s = ctx.settings.get()
@@ -534,7 +621,32 @@ def make_handler(ctx):
                 key = ctx.env.gemini_by_id(str(d.get('id', '')))
                 if not key:
                     raise ValidationError('no such key')
-                return self._json(200, self._test_gemini(key))
+                res = gemini_check_key(key, ctx.env.gemini_models(), with_fallback=True)     # one key, asked on purpose
+                ctx.key_status[config.key_id(key)] = res
+                return self._json(200, res)
+            if path == '/api/gemini/test_all':
+                if not ctx.key_check_lock.acquire(blocking=False):
+                    raise ValidationError('a key check is already running')
+                try:
+                    keys, models = ctx.env.gemini_keys(), ctx.env.gemini_models()
+                    with_fallback = bool(d.get('fallback'))          # off by default: it would spend the fallback's quota
+                    results, gate = {}, threading.Semaphore(6)       # a few at a time: gentle on Google
+
+                    def work(k):
+                        with gate:
+                            results[config.key_id(k)] = gemini_check_key(k, models, with_fallback)
+                    threads = [threading.Thread(target=work, args=(k,), daemon=True) for k in keys]
+                    for t in threads:
+                        t.start()
+                    for t in threads:
+                        t.join(60)
+                    ctx.key_status.update(results)
+                    summary = {}
+                    for r in results.values():
+                        summary[r['state']] = summary.get(r['state'], 0) + 1
+                    return self._json(200, {'results': results, 'summary': summary, 'total': len(keys)})
+                finally:
+                    ctx.key_check_lock.release()
 
             if path == '/api/rviz/install':
                 if not ctx.busy.acquire(blocking=False):
@@ -562,20 +674,6 @@ def make_handler(ctx):
                 threading.Thread(target=fast, daemon=True).start()
             threading.Thread(target=supervisor.run_ros, args=(['python3', '-c', supervisor.HALT_SCRIPT],),
                              kwargs={'timeout': 20, 'env_store': ctx.env}, daemon=True).start()
-
-        @staticmethod
-        def _test_gemini(key):
-            req = urllib.request.Request('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1',
-                                         headers={'x-goog-api-key': key})
-            try:
-                with urllib.request.urlopen(req, timeout=10) as r:
-                    return {'ok': True, 'status': r.status, 'detail': 'Key accepted.'}
-            except urllib.error.HTTPError as e:
-                detail = {400: 'Rejected (invalid key).', 401: 'Rejected (unauthorised).', 403: 'Rejected (forbidden or API not enabled).',
-                          429: 'Valid, but currently rate-limited.'}.get(e.code, f'HTTP {e.code}')
-                return {'ok': e.code == 429, 'status': e.code, 'detail': detail}
-            except Exception as e:
-                return {'ok': False, 'status': None, 'detail': f'Could not reach Google: {type(e).__name__}'}
 
     return Handler
 

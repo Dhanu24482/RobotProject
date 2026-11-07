@@ -36,6 +36,7 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile
 from std_msgs.msg import String
 
+from omni_base import canvas_spec
 from omni_base.motion_stop import Halter
 
 MAX_BODY = 2048
@@ -57,6 +58,7 @@ STATIC_FILES = {
     '/':        ('index.html', 'text/html; charset=utf-8'),
     '/app.js':  ('app.js',     'text/javascript; charset=utf-8'),
     '/app.css': ('app.css',    'text/css; charset=utf-8'),
+    '/board.js': ('board.js',   'text/javascript; charset=utf-8'),
 }
 
 SECURITY_HEADERS = {
@@ -110,6 +112,7 @@ class RemoteNode(Node):
         self.socket_path = self.declare_parameter('socket_path', '').value
         remote_topic = self.declare_parameter('remote_topic', '/robot/voice/remote_action').value
         reply_topic = self.declare_parameter('reply_topic', '/robot/voice/reply').value
+        canvas_topic = self.declare_parameter('canvas_topic', '/robot/voice/canvas').value
         body_topic = self.declare_parameter('body_topic', '/robot/body/command').value
 
         share = get_package_share_directory('omni_base')
@@ -120,6 +123,7 @@ class RemoteNode(Node):
         # bridge STOP + cancel Nav2 goals + zero /cmd_vel (see motion_stop.py).
         self.halter = Halter(self, body_topic=body_topic)
         self.create_subscription(String, reply_topic, self._on_reply, 10)
+        self.create_subscription(String, canvas_topic, self._on_canvas, 10)
 
         # Room names the page needs to resolve "go to <room>" (static + user-saved).
         self.static_rooms = self._load_static_rooms(os.path.join(share, 'config', 'rooms.yaml'))
@@ -131,6 +135,8 @@ class RemoteNode(Node):
         self.replies = deque(maxlen=50)
         self.reply_id = 0
         self.reply_lock = threading.Lock()
+        self.canvas = None          # the newest picture: {'id': n, 'spec': {...}}
+        self.canvas_id = 0
 
         # Simple global command throttle: at most 20 commands per 10 s.
         self._cmd_times = deque()
@@ -175,6 +181,25 @@ class RemoteNode(Node):
         with self.reply_lock:
             self.reply_id += 1
             self.replies.append({'id': self.reply_id, 'text': msg.data[:400]})
+
+    def _on_canvas(self, msg):
+        # The robot already sanitised it; this is the border to the browser, so do it again (never trust the topic).
+        try:
+            spec = canvas_spec.sanitize(json.loads(msg.data))
+        except ValueError:
+            spec = None
+        if not spec:
+            return
+        with self.reply_lock:
+            self.canvas_id += 1
+            self.canvas = {'id': self.canvas_id, 'spec': spec}
+
+    def canvas_after(self, after):
+        """(the newest picture if the page has not seen it yet, else None; id of the newest picture)"""
+        with self.reply_lock:
+            if after is None or self.canvas is None or self.canvas['id'] <= after:
+                return None, self.canvas_id
+            return self.canvas, self.canvas_id
 
     def replies_after(self, after):
         with self.reply_lock:
@@ -299,7 +324,13 @@ class RemoteNode(Node):
                     except ValueError:
                         after = None
                     replies, last = node.replies_after(after)
-                    return self._json(200, {'replies': replies, 'last': last})
+                    ca = parse_qs(url.query).get('canvas_after', [None])[0]
+                    try:
+                        ca = int(ca) if ca is not None else None
+                    except ValueError:
+                        ca = None
+                    canvas, canvas_last = node.canvas_after(ca)
+                    return self._json(200, {'replies': replies, 'last': last, 'canvas': canvas, 'canvas_last': canvas_last})
                 return self._send(404)
 
             def do_POST(self):

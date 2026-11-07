@@ -213,7 +213,7 @@ if (typeof module !== 'undefined') module.exports = { parse, normalize, createHo
 if (typeof document !== 'undefined') (function () {
   const $ = id => document.getElementById(id);
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  let rooms = [], lastReply = null;
+  let rooms = [], lastReply = null, lastCanvas = null;
 
   // ── toasts ──
   function toast(kind, text, ms) {
@@ -315,9 +315,15 @@ if (typeof document !== 'undefined') (function () {
   async function pollReplies() {
     if (document.hidden) return;
     try {
-      const d = await get('api/replies' + (lastReply !== null ? '?after=' + lastReply : ''));
-      if (lastReply !== null) d.replies.forEach(function (r) { toast('bot', 'Lumi: ' + r.text, 4500); });
+      const q = lastReply !== null ? '?after=' + lastReply + '&canvas_after=' + lastCanvas : '';
+      const d = await get('api/replies' + q);
+      if (lastReply !== null) {
+        d.replies.forEach(function (r) { toast('bot', 'Lumi: ' + r.text, 4500); });
+        // A little picture came with the answer: show it for the time the AI suggested, then it fades (or tap X).
+        if (d.canvas && d.canvas.spec && window.LumiBoard) window.LumiBoard.show(d.canvas.spec);
+      }
       lastReply = d.last;
+      lastCanvas = d.canvas_last;                  // on the first poll this only marks "already seen": no old picture pops up
     } catch (_) { /* transient */ }
   }
   // ── fullscreen (a wall tablet or a phone should be able to hide the browser chrome) ──────────────────

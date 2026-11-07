@@ -23,6 +23,18 @@
     </div>
   </header>
   <main>
+    <section id="board" class="board" hidden role="status" aria-live="polite">
+      <div class="board-head">
+        <h2 id="board-title"></h2>
+        <button id="board-x" class="board-x" type="button" aria-label="Dismiss the picture" title="Dismiss">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <div id="board-art" class="board-art"></div>
+      <p id="board-formula" class="board-formula" hidden></p>
+      <ul id="board-notes" class="board-notes" hidden></ul>
+      <div class="board-time" aria-hidden="true"><i id="board-bar"></i></div>
+    </section>
     <button id="talk" type="button" data-state="idle" aria-pressed="false" aria-label="Hold to speak">
       <span class="ring"></span>
       <svg class="mic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3.5 3.5 0 0 0 3.5-3.5V6a3.5 3.5 0 0 0-7 0v5.5A3.5 3.5 0 0 0 12 15zm6-3.5a1 1 0 1 0-2 0 4 4 0 0 1-8 0 1 1 0 1 0-2 0 6 6 0 0 0 5 5.92V20H9a1 1 0 1 0 0 2h6a1 1 0 1 0 0-2h-2v-2.58A6 6 0 0 0 18 11.5z"/></svg>
@@ -33,6 +45,7 @@
       Try &ldquo;go to room 1&rdquo;, &ldquo;turn left&rdquo;, &ldquo;wave&rdquo;. Start a question with &ldquo;Hey Lumi&rdquo;.</p>
   </main>
   <button id="stop" class="stop" type="button" title="Stop all motion (Esc)">STOP</button>
+  <script src="board.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
